@@ -1,0 +1,27 @@
+## files in base directory
+#/*.*
+# Temporary files
+*.*~
+# vim swap files
+*.sw*
+# Eclipse files
+.project
+.*project
+.settings
+# Pickled results
+*.pickle*
+# Images
+*.png
+# Data
+data
+data/*
+# Logs
+logs
+logs/*
+# MCMC draws
+mcmcDraws
+mcmcDraws/*
+# vim sessions
+*.vim
+# Python bytecode
+*.pyc
