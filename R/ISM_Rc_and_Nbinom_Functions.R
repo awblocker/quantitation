@@ -110,7 +110,6 @@ characterizeCensoredIntensityDistribution <- function(
 		print(paste("Mu:", mu[indx])[1])
 		y_hat <- x_n
 	}
-	print y_hat
 	
 	# 2) Approximate sd.
 	approx_sd <- sqrt(-1/g_doubleprime)
