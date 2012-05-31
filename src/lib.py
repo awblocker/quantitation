@@ -4,13 +4,11 @@
 
 import numpy as np
 import copy
-
-from scipy import linalg
-from scipy import stats
-from scipy import optimize
 from scipy import special
 
+#==============================================================================
 # Exceptions
+#==============================================================================
 
 class Error(Exception):
     '''
@@ -23,7 +21,9 @@ class BisectionError(Error):
     Exception class for errors particular to bisection algorithms.
     '''
 
+#==============================================================================
 # Densities and probabilities
+#==============================================================================
 
 def dnorm(x, mu=0, sigmasq=1, log=False):
     '''
@@ -145,7 +145,9 @@ def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat,
     deriv -= deriv_logdt(x, mu=y_hat, scale=approx_sd, df=propDf)
     return deriv
 
+#==============================================================================
 # RNGs
+#==============================================================================
 
 def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
     '''
@@ -193,7 +195,9 @@ def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
     n_cen = n_cen + (n_obs==0)
     return n_cen
 
+#==============================================================================
 # Optimization and root-finding routines
+#==============================================================================
 
 def vectorizedBisection(f, lower, upper, f_args=tuple(), f_kwargs={},
                         tol=1e-10, maxIter=100, full_output=False):
@@ -279,7 +283,9 @@ def halley(f, fprime, f2prime, x0, f_args=tuple(), f_kwargs={},
     return x
     
 
+#==============================================================================
 # Numerical integration functions
+#==============================================================================
 
 def laplaceApprox(f, xhat, info, f_args=tuple(), f_kwargs={}):
     '''
@@ -290,7 +296,9 @@ def laplaceApprox(f, xhat, info, f_args=tuple(), f_kwargs={}):
     integral = np.sqrt(2.*np.pi / info) * f(xhat, *f_args, **f_kwargs)
     return integral
 
-# Specialized functions
+#==============================================================================
+# Specialized functions for marginalized missing data draws
+#==============================================================================
 
 def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
                                       tol=1e-5, maxIter=200, bisectIter=10,
@@ -498,12 +506,80 @@ def rcensoredintensities(n_cen, mu, sigmasq, y_hat, approx_sd,
         
         # Accept draws with given probabilities by marking corresponding active
         # entries False.
-        u       = np.random.uniform(size=np.sum(active))
-        active[active] = u > accept_prob
+        u               = np.random.uniform(size=np.sum(active))
+        active[active]  = u > accept_prob
     
     # Build output
     out = {'mapping' : mapping,
            'W' : W,
            'intensities' : intensities}
     return out
+
+#==============================================================================
+# Gibbs and MH updates
+#==============================================================================
+
+def rgibbs_gamma(mu, tausq, sigmasq, y_bar, n_states):    
+    '''
+    Gibbs update for gamma (peptide-level means) given all other parameters.
     
+    This is a standard conjugate normal draw for a hierarchical model.
+    The dimensionality of the draw is determined by the size of y_bar.
+    All other inputs must be compatible in size.
+    '''
+    # Compute the conditional posterior mean and variance of gamma
+    post_var    = 1. / ( 1./tausq + n_states/sigmasq )
+    post_mean   = post_var * ( mu/tausq + y_bar/sigmasq*n_states)
+    
+    # Draw gamma
+    gamma = np.random.normal(loc=post_mean, scale=np.sqrt(post_var),
+                             size=y_bar.size)
+    return gamma
+    
+def rgibbs_mu(gamma_bar, tausq, n_peptides, prior_mean=0., prior_prec=0.):
+    '''
+    Gibbs update for mu (protein-level means) given all other parameters.
+    
+    This is a standard conjugate normal draw for a hierarchical model.
+    The dimensionality of the draw is determined by the size of gamma_bar.
+    All other inputs must be compatible in size.
+    '''
+    # Compute conditional posterior mean and variance
+    post_var    = 1. / (n_peptides/tausq + prior_prec)
+    post_mean   = post_var * (gamma_bar*n_peptides/tausq +
+                              prior_mean*prior_prec)
+    
+    # Draw mu
+    mu = np.random.normal(loc=post_mean, scale=np.sqrt(post_var),
+                          size=gamma_bar.size)
+    return mu
+
+def rgibbs_sigmasq(rss, n_states_total, alpha=1., beta=0.):
+    '''
+    Gibbs update for sigmasq (state-level variances) given all other parameters.
+    
+    This is a standard conjugate inverse-gamma draw for a hierarchical model.
+    The input rss must be the vector of residual sums of squares at the
+    state level by protein; that is sum( (intensities - gamma)**2 ) by protein.
+    The dimensionality of the draw is determined by the size of rss.
+    All other inputs must be compatible in size.
+    '''
+    sigmasq = 1. / np.random.gamma(shape=alpha + n_states_total/2.,
+                                   scale=1./(beta + rss/2.), size=rss.size)
+    return sigmasq
+
+def rgibbs_tausq(rss, n_peptides, alpha=1., beta=0.):
+    '''
+    Gibbs update for tausq (peptide-level variances) given all other parameters.
+    
+    This is a standard conjugate inverse-gamma draw for a hierarchical model.
+    The input rss must be the vector of residual sums of squares at the
+    peptide level by protein; that is sum( (gamma - mu)**2 ) by protein.
+    The dimensionality of the draw is determined by the size of rss.
+    All other inputs must be compatible in size.
+    '''
+    tausq = 1. / np.random.gamma(shape=alpha + n_peptides/2.,
+                                 scale=1./(beta + rss/2.), size=rss.size)
+    return tausq
+
+
