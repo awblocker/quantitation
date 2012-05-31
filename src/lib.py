@@ -25,7 +25,7 @@ class BisectionError(Error):
 
 # Densities and probabilities
 
-def dnorm(x, mu, sigmasq, log=False):
+def dnorm(x, mu=0, sigmasq=1, log=False):
     '''
     Gaussian density parameterized by mean and variance.
     Syntax mirrors R.
@@ -36,7 +36,7 @@ def dnorm(x, mu, sigmasq, log=False):
     else:
         return np.exp(ld)
 
-def dlnorm(x, mu, sigmasq, log=False):
+def dlnorm(x, mu=0, sigmasq=1, log=False):
     '''
     Density function for log-normal, parameterized by mean and variance of
     log(x). Syntax mirrors R.
@@ -88,8 +88,37 @@ def dobs(x, mu, sigmasq, eta_0, eta_1, log=False):
         return ld
     else:
         return np.exp(ld)
+
+def dt(x, mu=0., scale=1., df=1., log=False):
+    '''
+    Normalized t density function with location parameter mu and scale parameter
+    scale.
+    '''
+    ld = -(df + 1.)/2. * np.log(1. + (x - mu)**2 / scale**2 / df)
+    ld -= 0.5*np.log(np.pi * df) + np.log(scale)
+    ld += special.gammaln((df + 1.)/2.) - special.gammaln(df/2.)
+    if log:
+        return ld
+    return np.exp(ld)
+
+def densityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, yhat, propDf,
+                 normalizing_cnst, log=False):
+    '''
+    Target-proposal ratio for censored intensity rejection sampler.
+    '''
+    ld = dcensored(x, mu, sigmasq, eta_0, eta_1, log=True)
+    ld -= dt(x, mu=yhat, scale=approx_sd, df=propDf, log=True)
+    ld += np.log(normalizing_cnst)
+    if log:
+        return ld
+    return np.exp(ld)
         
 # Useful derivatives; primarily used in mode-finding routines
+def deriv_logdt(x, mu=0, scale=1, df=1.):
+    deriv = -(df + 1.) / (1. + (x - mu)**2 / scale**2 / df)
+    deriv *= (x - mu) / scale**2 / df
+    return deriv
+
 def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1):
     deriv = (-1. + 1./(1. + np.exp(eta_0 + eta_1*x))) * eta_1 - (x - mu)/sigmasq
     return deriv
@@ -105,6 +134,16 @@ def deriv3_logdcensored(x, mu, sigmasq, eta_0, eta_1):
               - (eta_1**3 * np.exp(eta_0 + eta_1*x)) /
               (1. + np.exp(eta_0 + eta_1*x))**2)
     return deriv3
+
+def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, yhat,
+                          propDf):
+    '''
+    First derivative of the log target-proposal ratio for censored intensity
+    rejection sampler.
+    '''
+    deriv = deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1)
+    deriv -= deriv_logdt(x, mu=yhat, scale=approx_sd, df=propDf)
+    return deriv
 
 # RNGs
 
@@ -241,6 +280,7 @@ def halley(f, fprime, f2prime, x0, f_args=tuple(), f_kwargs={},
         return (x, t)
     
     return x
+    
 
 # Numerical integration functions
 
@@ -265,7 +305,7 @@ def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
 
     Returns dictionary with three entries:
         1) yhat, the approximate mode of the given conditional distribution
-        2) p_int_censored, the approximate probabilities of intensity-based
+        2) p_int_cen, the approximate probabilities of intensity-based
            censoring
         3) approx_sd, the approximate SDs of the conditional intensity
            distributions
@@ -297,11 +337,97 @@ def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
     
     # 3) Use Laplace approximation to approximate p(int. censoring); this is the
     # normalizing constant of the given conditional distribution
-    p_int_censored = laplaceApprox(f=dcensored, xhat=yhat, info=info,
-                                   f_kwargs=dargs)
+    p_int_cen = laplaceApprox(f=dcensored, xhat=yhat, info=info,
+                              f_kwargs=dargs)
     
     # Return dictionary containing combined result
     result = {'yhat' : yhat,
-              'p_int_censored' : p_int_censored,
+              'p_int_cen' : p_int_cen,
               'approx_sd' : approx_sd}
     return result
+    
+def boundDensityRatio(eta_0, eta_1, mu, sigmasq, yhat, approx_sd, propDf,
+                      normalizing_cnst, tol=1e-10, maxIter=100,
+                      bisectScale=1.):
+    '''
+    Bound ratio of t proposal density to actual censored intensity density.
+    This is used to construct an efficient, robust rejection sampler to exactly
+    draw from the conditional posterior of censored intensities.
+    This computation is fully vectorized with respect to mu, sigmasq, yhat,
+    approx_sd, and normalizing_cnst.
+
+    Based on the properties of these two densities, their ratio will have three
+    critical points. These consist of a local minimum, flanked by two local
+    maxima. 
+    
+    It returns the smallest constant M such that the t proposal density times M
+    is uniformly >= the actual censored intensity density.
+    '''
+    # Construct kwargs for calls to densities and their derivatives
+    dargs = {'eta_0' : eta_0,
+             'eta_1' : eta_1,
+             'mu' : mu,
+             'sigmasq' : sigmasq,
+             'approx_sd' : approx_sd,
+             'yhat' : yhat,
+             'propDf' : propDf}
+    
+    # Initialize vectors for all four of the bounds
+    left_lower = np.zeros_like(yhat)
+    left_upper = np.zeros_like(yhat)
+    right_lower = np.zeros_like(yhat)
+    right_upper = np.zeros_like(yhat)
+    
+    # Make sure the starting points are the correct sign
+    left_lower = yhat - bisectScale*approx_sd
+    left_upper = yhat - 10*tol
+    right_lower = yhat + 10*tol
+    right_upper = yhat + bisectScale*approx_sd
+    
+    # Left lower bounds
+    invalid = (deriv_logdensityratio(left_lower, **dargs) < 0)
+    while np.any(invalid):
+        left_lower[invalid] -= approx_sd[invalid]
+        invalid = (deriv_logdensityratio(left_lower, **dargs) < 0)
+    
+    # Left upper bounds
+    invalid = (deriv_logdensityratio(left_upper, **dargs) > 0)
+    while np.any(invalid):
+        left_lower[invalid] -= 10*tol
+        invalid = (deriv_logdensityratio(left_upper, **dargs) > 0)
+    
+    # Right lower bounds
+    invalid = (deriv_logdensityratio(right_lower, **dargs) < 0)
+    while np.any(invalid):
+        right_lower[invalid] += 10*tol
+        invalid = (deriv_logdensityratio(right_lower, **dargs) < 0)
+    
+    # Right upper bounds
+    invalid = (deriv_logdensityratio(right_upper, **dargs) > 0)
+    while np.any(invalid):
+        right_upper[invalid] += approx_sd[invalid]
+        invalid = (deriv_logdensityratio(right_upper, **dargs) > 0)
+
+
+    # Find zeros that are less than y_hat using bisection.
+    left_roots = vectorizedBisection(f=deriv_logdensityratio, f_kwargs=dargs,
+                                     lower=left_lower, upper=left_upper,
+                                     tol=tol, maxIter=maxIter)
+    
+    # Find zeros that are greater than y_hat using bisection.
+    right_roots = vectorizedBisection(f=deriv_logdensityratio, f_kwargs=dargs,
+                                     lower=right_lower, upper=right_upper,
+                                     tol=tol, maxIter=maxIter)
+        
+    # Compute bounding factor M
+    f_left_roots = densityratio(left_roots, normalizing_cnst=normalizing_cnst,
+                                **dargs)
+    f_right_roots = densityratio(right_roots, normalizing_cnst=normalizing_cnst,
+                                 **dargs)
+    
+    # Store maximum of each root
+    M = np.maximum(f_left_roots, f_right_roots)
+        
+    # Return results
+    return M
+
