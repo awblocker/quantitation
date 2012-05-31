@@ -156,7 +156,7 @@ def rncen(nobs, prc, pic, lmbda, r):
     m = nobs.size
 
     # Setup vectors for result and stopping indicators
-    done    = np.zeros(m, dtype=bool)
+    active  = np.ones(m, dtype=bool)
     nCen    = np.zeros(m, dtype=int)
 
     # Compute probability for geometric component of density
@@ -169,17 +169,14 @@ def rncen(nobs, prc, pic, lmbda, r):
 
     # Run rejection sampling iterations
     nIter = 0
-    while done.sum() < m:
-        # Get indices of observations remaining to sample
-        active  = np.where(~done)[0]
-
+    while np.sum(active) > 0:
         # Propose from negative binomial distribution
         # This is almost correct, modulo the 0 vs. 1 minimum non-conjugacy
         prop    = np.random.negative_binomial(nobs[active] + r, pgeom[active],
                                               size=active.size)
 
         # Compute acceptance probability; bog standard
-        u       = np.random.uniform(size=m-done.sum())
+        u       = np.random.uniform(size=np.sum(active))
         pAccept = (nobs[active]+prop) / (nobs[active]+prop+r-1) * bound[active]
 
         # Alway accept for nObs == 0; in that case, our draw is exact
@@ -187,7 +184,7 @@ def rncen(nobs, prc, pic, lmbda, r):
 
         # Execute acceptance step and update done indicators
         nCen[active[u<pAccept]] = prop[u<pAccept]
-        done[active] = u<pAccept
+        active[active] = u>pAccept
 
         nIter += 1
 
@@ -431,3 +428,82 @@ def boundDensityRatio(eta_0, eta_1, mu, sigmasq, yhat, approx_sd, propDf,
     # Return results
     return M
 
+def rcensoredintensities(n_cen, mu, sigmasq, yhat, approx_sd,
+                         p_int_cen, p_rnd_cen,
+                         eta_0, eta_1, propDf,
+                         tol=1e-10, maxIter=100):
+    '''
+    Draw censored intensities and random censoring indicators given nCen and
+    quantities computed from Laplace approximation
+    '''
+    # Setup data structures for draws
+    nStates = np.sum(n_cen)
+    # Intensities
+    intensities = np.zeros(nStates, dtype=np.float64)
+    # And, the vital indexing vector of length sum(n). This can be used for
+    # direct referencing to all input vectors to handle the state to peptide
+    # mapping
+    mapping = np.zeros(nStates, dtype=int)
+    
+    # Populate index vector
+    filled = 0
+    for i in xrange(n_cen.size):
+        if n_cen[i] > 0:
+            # Get slice to insert new data
+            pep = slice(filled, filled + n_cen[i])
+            
+            # Populate index vector
+            mapping[pep] = i
+            
+            # Update filled counter
+            filled += n_cen[i]
+    
+    # Draw the random censoring indicators. Note that W=1 if randomly censored.
+    post_p_rnd_cen = p_rnd_cen / (p_rnd_cen + (1.-p_rnd_cen)*p_int_cen)
+    W = (np.random.uniform(size=nStates) < post_p_rnd_cen[mapping]).astype(int)
+    
+    # Drawing censored intensities    
+    # First, get the maximum of the target / proposal ratio for each set of
+    # unique parameter values (not per state)
+    M = boundDensityRatio(eta_0=eta_0, eta_1=eta_1, mu=mu, sigmasq=sigmasq,
+                          yhat=yhat, approx_sd=approx_sd,
+                          normalizing_cnst=1./p_int_cen, propDf=propDf,
+                          tol=tol, maxIter=maxIter)
+    
+    # Next, draw randomly-censored intensities
+    intensities[W==1] = np.random.normal(loc=mu[mapping[W==1]],
+                                         scale=np.sqrt(sigmasq[mapping[W==1]]),
+                                         size=np.sum(W))
+    
+    # Draw remaining intensity-censored intensities using rejection sampler
+    active = (W == 0)
+    while( np.sum(active) > 0):
+        # Propose from t distribution
+        intensities[active] = np.random.standard_t(df=propDf,
+                                                   size=np.sum(active))
+        intensities[active] *= approx_sd[mapping[active]]
+        intensities[active] += yhat[mapping[active]]
+        
+        # Compute acceptance probability
+        accept_prob = densityratio(intensities[active],
+                                   eta_0=eta_0, eta_1=eta_1,
+                                   mu=mu[mapping[active]],
+                                   sigmasq=sigmasq[mapping[active]],
+                                   approx_sd=approx_sd[mapping[active]],
+                                   yhat=yhat[mapping[active]],
+                                   normalizing_cnst=1./
+                                   p_int_cen[mapping[active]],
+                                   propDf=propDf, log=False)
+        accept_prob /= M[mapping[active]]
+        
+        # Accept draws with given probabilities by marking corresponding active
+        # entries False.
+        u       = np.random.uniform(size=np.sum(active))
+        active[active] = u > accept_prob
+    
+    # Build output
+    out = {'mapping' : mapping,
+           'W' : W,
+           'intensities' : intensities}
+    return out
+    
