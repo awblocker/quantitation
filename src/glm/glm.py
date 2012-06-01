@@ -45,10 +45,10 @@ def wls(X, y, w, method='cholesky'):
         Q, R = linalg.qr(Xw, mode='economic')
         
         # Calculate z = Q'y
-        z = np.dot(Q.T, y)
+        z = np.dot(Q.T, yw)
         
         # Solve reduced normal equations
-        b = linalg.solve_triangular(R, z, lower=False, trans=1)
+        b = linalg.solve_triangular(R, z, lower=False)
     
     resid = y - np.dot(X, b)
     
