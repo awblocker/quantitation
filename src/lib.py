@@ -112,8 +112,21 @@ def densityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat, propDf,
     if log:
         return ld
     return np.exp(ld)
+    
+def dgamma(x, shape=1., rate=1., log=False):
+    '''
+    Normalized gamma density function, parameterized by shape and rate.
+    '''
+    ld = np.log(x)*(shape - 1.) - rate*x
+    ld += shape*np.log(rate) - special.gammaln(shape)
+    if log:
+        return ld
+    return np.exp(ld)
         
+#==============================================================================
 # Useful derivatives; primarily used in mode-finding routines
+#==============================================================================
+
 def deriv_logdt(x, mu=0, scale=1, df=1.):
     deriv = -(df + 1.) / (1. + (x - mu)**2 / scale**2 / df)
     deriv *= (x - mu) / scale**2 / df
@@ -148,6 +161,18 @@ def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat,
 #==============================================================================
 # RNGs
 #==============================================================================
+
+def rmvnorm(n, mu, L):
+    '''
+    Draw d x n matrix of multivariate normal RVs with mean vector mu (length d)
+    and covariance matrix L * L.T.
+    '''
+    d = L.shape[0]
+    z = np.random.randn(d, n)
+    
+    y = mu + np.dot(L, z)
+    
+    return y
 
 def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
     '''
@@ -581,5 +606,4 @@ def rgibbs_tausq(rss, n_peptides, alpha=1., beta=0.):
     tausq = 1. / np.random.gamma(shape=alpha + n_peptides/2.,
                                  scale=1./(beta + rss/2.), size=rss.size)
     return tausq
-
 
