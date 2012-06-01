@@ -1,6 +1,8 @@
 import numpy as np
 from scipy import stats
 
+EPS = np.spacing(1)
+
 #==============================================================================
 # Skeleton parent class 
 #==============================================================================
@@ -92,11 +94,14 @@ class Probit(Link):
     '''
     Probit link.
     '''
+    bound = -stats.norm.ppf(EPS)
+    
     def __call__(self, mu):
         '''
         Probit link function
         '''
-        return stats.norm.ppf(mu)
+        return np.minimum(self.bound,
+                          np.maximum(-self.bound, stats.norm.ppf(mu)))
     
     def inv(self, eta):
         '''
@@ -108,7 +113,7 @@ class Probit(Link):
         '''
         Derivative of probit link function with respect to mu.
         '''
-        return 1./stats.norm.pdf(mu)
+        return 1./np.maximum(stats.norm.pdf(mu), EPS)
 
 class Cloglog(Link):
     '''
