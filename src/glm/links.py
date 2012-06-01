@@ -113,7 +113,7 @@ class Probit(Link):
         '''
         Derivative of probit link function with respect to mu.
         '''
-        return 1./np.maximum(stats.norm.pdf(mu), EPS)
+        return 1./np.maximum(stats.norm.pdf(stats.norm.ppf(mu)), EPS)
 
 class Cloglog(Link):
     '''
