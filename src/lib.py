@@ -5,6 +5,14 @@
 import numpy as np
 import copy
 from scipy import special
+from scipy import optimize
+from scipy import linalg
+
+#==============================================================================
+# Useful constants
+#==============================================================================
+
+EPS = np.spacing(1)
 
 #==============================================================================
 # Exceptions
@@ -122,6 +130,33 @@ def dgamma(x, shape=1., rate=1., log=False):
     if log:
         return ld
     return np.exp(ld)
+
+def lp_profile_gamma(shape, x, prior_shape=1., prior_rate=0., 
+                     prior_mean_log=0., prior_prec_log=0.):
+    '''
+    Compute profile log-posterior of shape parameter for gamma likelihood.
+    Assuming conditionally-conjugate gamma prior on observation distribution's
+    rate parameter with given parameters.
+    
+    Also using log-normal prior on shape parameter itself with given log-mean
+    and precision.
+    
+    Returns a float with the profile log-posterior.
+    '''
+    n = np.size(x)
+    
+    # Compute conditional posterior mode of rate parameter
+    rate_hat = (shape + (prior_shape-1.)/n)/(np.mean(x) + prior_rate/n)
+    
+    # Evaluate log-posterior at conditional mode
+    lp = np.sum(dgamma(x, shape=shape, rate=rate_hat, log=True))
+    # Add prior for rate parameter
+    lp += dgamma(rate_hat, shape=prior_shape, rate=prior_rate, log=True)
+    # Add prior for shape parameter
+    lp += dlnorm(shape, mu=prior_mean_log,
+                 sigmasq=1./np.float64(prior_prec_log), log=True)
+    
+    return lp
         
 #==============================================================================
 # Useful derivatives; primarily used in mode-finding routines
@@ -157,6 +192,130 @@ def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat,
     deriv = deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1)
     deriv -= deriv_logdt(x, mu=y_hat, scale=approx_sd, df=propDf)
     return deriv
+
+def score_profile_posterior_gamma(shape, x, log=False,
+                                  prior_shape=1., prior_rate=0., 
+                                  prior_mean_log=0., prior_prec_log=0.):
+    '''
+    Compute profile posterior score for shape parameter of gamma
+    distribution.
+    
+    If log, compute score for log(shape) instead.
+    
+    Assumes a conjugate gamma prior on the rate parameter and an independent
+    log-normal prior on the shape parameter, each with the given parameters.
+    
+    Returns a float with the desired score.
+    '''
+    # Compute conditional posterior mode of rate parameter
+    n = np.size(x)
+    rate_hat = (shape + (prior_shape-1.)/n)/(np.mean(x) + prior_rate/n)    
+    
+    # Compute score for untransformed shape parameter
+    score = (np.sum(np.log(x)) - n*special.polygamma(0, shape) + 
+             n*np.log(rate_hat) - 
+             prior_prec_log*(np.log(shape)-prior_mean_log)/shape - 1./shape)
+    
+    # Handle log transformation of parameters via simple chain rule
+    if log:
+        # Compute derivative of untransformed parameters wrt transformed ones
+        deriv   = shape
+        
+        # Update information using chain rule
+        score   *= deriv
+    
+    return score
+
+def info_posterior_gamma(shape, rate, x, log=False,
+                         prior_shape=1., prior_rate=0., 
+                         prior_mean_log=0., prior_prec_log=0.):
+    '''
+    Compute posterior information for shape and rate parameters of gamma 
+    distribution.
+    
+    If log, compute information for log(shape) and log(rate) instead.
+    This is typically more useful, as the normal approximation holds much better
+    on the log scale.
+    
+    Assumes a conjugate gamma prior on the rate parameter and an independent
+    log-normal prior on the shape parameter, each with the given parameters.
+    
+    Returns a 2x2 np.ndarray for which the first {row,column} corresponds to the
+    shape parameter and the second corresponds the rate parameter.
+    '''
+    # Compute observed information for untransformed parameters
+    n = np.size(x) 
+    info = np.zeros((2,2))
+    
+    # shape, shape
+    info[0,0] = (n*special.polygamma(1, shape) + 
+                 1/shape**2*(1+prior_prec_log*(np.log(shape)-prior_mean_log-1)))
+    # rate, rate
+    info[1,1] = (n*shape+prior_shape-1.)/rate**2
+    # shape, rate and rate, shape
+    info[0,1] = info[1,0] = -n/rate
+    
+    # Handle log transformation of parameters via simple chain rule
+    if log:
+        # Compute gradient for log-likelihood wrt untransformed parameters
+        grad = np.array([-n*np.log(rate) + n*special.polygamma(0, shape) -
+                         np.sum(np.log(x)) + 
+                         prior_prec_log*(np.log(shape)-prior_mean_log)/shape +
+                         1./shape,
+                         -(n*shape+prior_shape-1.)/rate+np.sum(x)+prior_rate])
+        
+        # Compute derivatives of untransformed parameters wrt transformed ones
+        deriv   = np.array([shape, rate])
+        deriv2  = deriv
+        
+        # Update information using chain rule
+        info    = info * deriv
+        info    = (info.T * deriv).T
+        np.fill_diagonal(info, info.diagonal() + deriv2*grad)
+        
+    return info
+
+def info_profile_posterior_gamma(shape, x, log=False,
+                                 prior_shape=1., prior_rate=0., 
+                                 prior_mean_log=0., prior_prec_log=0.):
+    '''
+    Compute profile posterior information for shape parameter of gamma
+    distribution.
+    
+    If log, compute information for log(shape) instead.
+    This is typically more useful, as the normal approximation holds much better
+    on the log scale.
+    
+    Assumes a conjugate gamma prior on the rate parameter and an independent
+    log-normal prior on the shape parameter, each with the given parameters.
+    
+    Returns a float with the desired information.
+    '''
+    n = np.size(x)
+    
+    # Compute information for untransformed shape parameter
+    info = (n*special.polygamma(1, shape) - n/(shape + (prior_shape-1.)/n) + 
+            1/shape**2*(1+prior_prec_log*(np.log(shape)-prior_mean_log-1)))
+    
+    # Handle log transformation of parameters via simple chain rule
+    if log:
+        # Compute conditional posterior mode of rate parameter
+        rate_hat = (shape + (prior_shape-1.)/n)/(np.mean(x) + prior_rate/n)
+        
+        # Compute gradient for log-likelihood wrt untransformed parameters
+        grad = (-np.sum(np.log(x)) + n*special.polygamma(0, shape) -
+                n*np.log(rate_hat) +
+                prior_prec_log*(np.log(shape)-prior_mean_log)/shape + 1./shape)
+        
+        # Compute derivatives of untransformed parameters wrt transformed ones
+        deriv   = shape
+        deriv2  = deriv
+        
+        # Update information using chain rule
+        info    = info * deriv**2
+        info    += deriv2*grad
+    
+    return info
 
 #==============================================================================
 # RNGs
@@ -541,6 +700,32 @@ def rcensoredintensities(n_cen, mu, sigmasq, y_hat, approx_sd,
     return out
 
 #==============================================================================
+# Generic MH updates
+#==============================================================================
+
+def mh_update(prop, prev, log_target_ratio, log_prop_ratio):
+    '''
+    Execute generic Metropolis-Hastings update.
+    
+    Takes proposed parameter prop, previous parameter prev, log ratio of target
+    densities log_target_ratio, and log ratio of proposal densities 
+    log_prop_ratio.
+    
+    Returns 2-tuple consisting of updated parameter and boolean indicating 
+    acceptance.
+    '''
+    # Compute acceptance probability
+    log_accept_prob = log_target_ratio - log_prop_ratio
+    
+    # Accept proposal with given probability
+    accept = (np.log(np.random.uniform(size=1)) < log_accept_prob)
+    
+    if accept:
+        return (prop, True)
+    else:
+        return (prev, False)
+
+#==============================================================================
 # Gibbs and MH updates
 #==============================================================================
 
@@ -579,31 +764,183 @@ def rgibbs_mu(gamma_bar, tausq, n_peptides, prior_mean=0., prior_prec=0.):
                           size=gamma_bar.size)
     return mu
 
-def rgibbs_sigmasq(rss, n_states_total, alpha=1., beta=0.):
+def rgibbs_variances(rss, n, alpha=1., beta=0.):
     '''
-    Gibbs update for sigmasq (state-level variances) given all other parameters.
+    Gibbs update for variances given all other parameters.
+    Used for sigmasq (state-level variances) and tausq (peptide-level
+    variances).
     
     This is a standard conjugate inverse-gamma draw for a hierarchical model.
-    The input rss must be the vector of residual sums of squares at the
-    state level by protein; that is sum( (intensities - gamma)**2 ) by protein.
+    
+    For sigmasq, the input rss must be the vector of residual sums of squares at
+    the state level by protein; that is sum( (intensities - gamma)**2 ) by 
+    protein. n must be a vector consisting of the total number of states 
+    observed for each protein.
+    
+    For tausq, the input rss must be the vector of residual sums of squares at 
+    the peptide level by protein; that is sum( (gamma - mu)**2 ) by protein. n 
+    must be a vector consisting of the number of peptides per protein.
+    
     The dimensionality of the draw is determined by the size of rss.
     All other inputs must be compatible in size.
     '''
-    sigmasq = 1. / np.random.gamma(shape=alpha + n_states_total/2.,
-                                   scale=1./(beta + rss/2.), size=rss.size)
-    return sigmasq
+    variances = 1. / np.random.gamma(shape=alpha + n/2.,
+                                     scale=1./(beta + rss/2.),
+                                     size=np.size(rss))
+    return variances
 
-def rgibbs_tausq(rss, n_peptides, alpha=1., beta=0.):
+def rgibbs_p_rnd_cen(n_rnd_cen, n_states, prior_a=1., prior_b=1.):
     '''
-    Gibbs update for tausq (peptide-level variances) given all other parameters.
+    Gibbs update for p_rnd_cen given all other parameters.
     
-    This is a standard conjugate inverse-gamma draw for a hierarchical model.
-    The input rss must be the vector of residual sums of squares at the
-    peptide level by protein; that is sum( (gamma - mu)**2 ) by protein.
-    The dimensionality of the draw is determined by the size of rss.
-    All other inputs must be compatible in size.
+    This is a conjugate beta draw with Bernoulli observations.
+    n_rnd_cen must be an integer with the total number of randomly-censored
+    states.
+    n_states must be an integer with the total number of states (including
+    imputed).
+    prior_a and prior_b are the parameters of a conjugate beta prior.
     '''
-    tausq = 1. / np.random.gamma(shape=alpha + n_peptides/2.,
-                                 scale=1./(beta + rss/2.), size=rss.size)
-    return tausq
+    p_rnd_cen = np.random.beta(a=n_rnd_cen+prior_a,
+                               b=n_states-n_rnd_cen+prior_b)
+    return p_rnd_cen
+    
+def rmh_variance_hyperparams(variances, shape_prev, rate_prev, 
+                             prior_mean_log=2.65, prior_prec_log=1./0.652**2,
+                             prior_shape=1., prior_rate=0.,
+                             brent_scale=6., fallback_upper=10000.,
+                             profile=False):
+    '''
+    Metropolis-Hastings steps for variance hyperparameters given all other
+    parameters.
+    
+    Have normal likelihood, so variance likelihood has the same form as gamma 
+    distribution. Using a log-normal prior for the shape hyperparameter and 
+    gamma prior for rate hyperparameter.
+    
+    Proposing from normal approximation to the conditional posterior 
+    (conditional independence chain). Parameters are log-transformed.
+        
+    Can propose from approximation to joint conditional posterior 
+    (profile=False) or approximately marginalize over the rate parameter (by 
+    profiling) and propose the rate given shape exactly (profile=True).
+    
+    Returns a 3-tuple consisting of the new shape, new rate, and a boolean 
+    indicating acceptance.
+    '''
+    # Compute posterior mode for shape and rate using profile log-posterior
+    n = np.size(variances)
+    
+    # Set upper bound first
+    if prior_prec_log > 0:
+        upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
+    else:
+        upper = fallback_upper
+    
+    # Use Brent method to find root of score function
+    shape_hat = optimize.brentq(f=score_profile_posterior_gamma,
+                                a=EPS, b=upper,
+                                args=(variances, False, prior_shape, prior_rate,
+                                      prior_mean_log, prior_prec_log))
+    
+    if profile:
+        # Propose based on profile posterior for shape and exact conditional
+        # posterior for rate.
+        
+        # Compute proposal variance
+        var_prop = 1./info_profile_posterior_gamma(shape=shape_hat,
+                                           x=variances, log=True,
+                                           prior_shape=prior_shape,
+                                           prior_rate=prior_rate,
+                                           prior_mean_log=prior_mean_log,
+                                           prior_prec_log=prior_prec_log)
+        
+        # Propose shape parameter from log-normal
+        shape_prop = shape_hat*np.exp(np.sqrt(var_prop)*np.random.randn(1))
+        
+        # Propose rate parameter given shape from exact gamma conditional
+        # posterior
+        rate_prop = np.random.gamma(shape=n*shape_prop + prior_shape,
+                                    scale=1./(np.sum(variances) + prior_rate))
+        
+        # Compute log-ratio of proposal densities
+        
+        # For proposal, start with log-normal proposal for shape
+        log_prop_ratio = (dlnorm(shape_prop, mu=np.log(shape_hat),
+                                 sigmasq=var_prop, log=True) -
+                          dlnorm(shape_prev, mu=np.log(shape_hat),
+                                 sigmasq=var_prop, log=True))
+        # Then, add conditional gamma proposal for rate
+        log_prop_ratio += (dgamma(rate_prop, shape=n*shape_prop + prior_shape,
+                                  rate=np.sum(variances) + prior_rate,
+                                  log=True) -
+                           dgamma(rate_prev, shape=n*shape_prop + prior_shape,
+                                  rate=np.sum(variances) + prior_rate,
+                                  log=True))
+    else:
+        # Propose using a bivariate normal approximate to the joint conditional
+        # posterior of (shape, rate)
+        
+        # Compute posterior mode of rate
+        rate_hat = ((shape_hat + (prior_shape-1.)/n) /
+                    (np.mean(variances) + prior_rate/n))
+        
+        # Compute posterior information matrix for parameters
+        info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
+                                    x=variances, log=True,
+                                    prior_shape=prior_shape,
+                                    prior_rate=prior_rate,
+                                    prior_mean_log=prior_mean_log,
+                                    prior_prec_log=prior_prec_log)
+        
+        # Cholesky decompose information matrix for bivariate draw and
+        # density calculations
+        U = linalg.cholesky(info, lower=False)
+        
+        # Propose shape and rate parameter jointly
+        theta_hat   = np.log(np.array([shape_hat, rate_hat]))
+        z_prop      = np.random.randn(2)
+        theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
+        shape_prop, rate_prop = np.exp(theta_prop)
+        
+        # Demean and decorrelate previous draws
+        theta_prev  = np.log(np.array([shape_prev, rate_prev]))
+        z_prev      = np.dot(U, theta_prev - theta_hat)
+        
+        # Compute log-ratio of proposal densities
+        
+        # These are exponentiated bivariate normals with equivalent covariance
+        # matrices, so the resulting Jacobian terms cancel. We are left to
+        # contend with the z's and the Jacobian terms resulting from
+        # exponentiation.
+        log_prop_ratio = np.sum(dnorm(z_prop, log=True) -
+                                dnorm(z_prev, log=True))
+        log_prop_ratio += -np.sum(theta_prop - theta_prev)
+    
+    # Compute log-ratio of target densities.
+    # This is equivalent for both proposals.
+        
+    # For target, start with the likelihood for the variances
+    log_target_ratio = np.sum(dgamma(variances, shape=shape_prop, 
+                                     rate=rate_prop, log=True) -
+                              dgamma(variances, shape=shape_prev,
+                                     rate=rate_prev, log=True))
+    if prior_prec_log > 0:
+        # Add the log-normal prior on the shape parameter
+        log_target_ratio += (dlnorm(shape_prop, mu=prior_mean_log,
+                                    sigmasq=1./prior_prec_log) -
+                             dlnorm(shape_prev, mu=prior_mean_log,
+                                    sigmasq=1./prior_prec_log))
+    # Add the gamma prior on the rate parameter
+    if prior_rate > 0:
+        log_target_ratio += (dgamma(rate_prop, shape=prior_shape,
+                                    rate=prior_rate, log=True) -
+                             dgamma(rate_prev, shape=prior_shape,
+                                    rate=prior_rate, log=True))
+    else:
+        log_target_ratio += np.log(rate_prop/rate_prev)*(shape_prop - 1.)
+    
+    # Execute MH update
+    return mh_update(prop=(shape_prop, rate_prop), prev=(shape_prev, rate_prev),
+                     log_target_ratio=log_target_ratio,
+                     log_prop_ratio=log_prop_ratio)
 
