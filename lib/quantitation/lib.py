@@ -340,7 +340,8 @@ def info_profile_posterior_gamma(shape, x, log=False,
 def score_profile_posterior_nbinom(r, x, log=False, prior_a=1., prior_b=1.,
                                    prior_mean_log=0., prior_prec_log=0.):
     '''
-    Profile posterior score for r (convolution) parameter of gamma distribution.
+    Profile posterior score for r (convolution) parameter of negative-binomial
+    distribution.
 
     If log, compute score for log(r) instead.
 
@@ -623,6 +624,78 @@ def laplaceApprox(f, xhat, info, f_args=tuple(), f_kwargs={}):
     '''
     integral = np.sqrt(2.*np.pi / info) * f(xhat, *f_args, **f_kwargs)
     return integral
+
+#==============================================================================
+# Functions for commonly-used MAP estimates
+#==============================================================================
+
+def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
+                        prior_mean_log=0., prior_prec_log=0.,
+                        brent_scale=6., fallback_upper=10000.):
+    '''
+    Maximum a posteriori estimator for shape and rate parameters of gamma 
+    distribution.
+
+    Assumes a conjugate gamma prior on the rate parameter and an independent
+    log-normal prior on the shape parameter, each with the given parameters.
+
+    Returns a 2-tuple with the MAP estimators for shape and rate.
+    '''
+    # Compute posterior mode for shape and rate using profile log-posterior
+    n = np.size(x)
+
+    # Set upper bound first
+    if prior_prec_log > 0:
+        upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
+    else:
+        upper = fallback_upper
+
+    # Use Brent method to find root of score function
+    shape_hat = optimize.brentq(f=score_profile_posterior_gamma,
+                                a=np.sqrt(EPS), b=upper,
+                                args=(x, False, prior_shape, prior_rate,
+                                      prior_mean_log, prior_prec_log))
+    
+    # Compute posterior mode of rate
+    rate_hat = ((shape_hat + (prior_shape-1.)/n) /
+                (np.mean(x) + prior_rate/n))
+    
+    return (shape_hat, rate_hat)
+
+def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
+                         prior_mean_log=0., prior_prec_log=0.,
+                         brent_scale=6., fallback_upper=10000.):
+    '''
+    Maximum a posteriori estimator for r (convolution) parameter and p parameter
+    of negative binomial distribution.
+
+    Assumes a conditionally conjugate beta prior on p and an independent
+    log-normal prior on r, each with the given parameters.
+
+    Returns a 2-tuple with the MAP estimators for r and p.
+    '''
+    # Compute posterior mode for r and p using profile log-posterior
+    n = np.size(x)
+    
+    # Set upper bound first
+    if prior_prec_log > 0:
+        upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
+    else:
+        upper = fallback_upper
+
+    # Use Brent method to find root of score function
+    r_hat = optimize.brentq(f=score_profile_posterior_nbinom,
+                            a=np.sqrt(EPS), b=upper,
+                            args=(x, False, prior_a, prior_b,
+                                  prior_mean_log, prior_prec_log))
+    
+    # Compute posterior mode of p
+    A = np.mean(x) + (prior_a- 1.)/n
+    B = r_hat + (prior_b - 1.)/n
+    p_hat = A / (A + B)
+    
+    return (r_hat, p_hat)
+    
 
 #==============================================================================
 # Specialized functions for marginalized missing data draws
@@ -974,17 +1047,13 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     # Compute posterior mode for shape and rate using profile log-posterior
     n = np.size(variances)
 
-    # Set upper bound first
-    if prior_prec_log > 0:
-        upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
-    else:
-        upper = fallback_upper
-
-    # Use Brent method to find root of score function
-    shape_hat = optimize.brentq(f=score_profile_posterior_gamma,
-                                a=EPS, b=upper,
-                                args=(variances, False, prior_shape, prior_rate,
-                                      prior_mean_log, prior_prec_log))
+    shape_hat, rate_hat = map_estimator_gamma(x=variances, 
+                                              prior_shape=prior_shape,
+                                              prior_rate=prior_rate,
+                                              prior_mean_log=prior_mean_log,
+                                              prior_prec_log=prior_prec_log,
+                                              brent_scale=brent_scale,
+                                              fallback_upper=fallback_upper)
 
     if profile:
         # Propose based on profile posterior for shape and exact conditional
@@ -1023,10 +1092,6 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     else:
         # Propose using a bivariate normal approximate to the joint conditional
         # posterior of (shape, rate)
-
-        # Compute posterior mode of rate
-        rate_hat = ((shape_hat + (prior_shape-1.)/n) /
-                    (np.mean(variances) + prior_rate/n))
 
         # Compute posterior information matrix for parameters
         info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
@@ -1112,18 +1177,12 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     '''
     # Compute posterior mode for r and p using profile log-posterior
     n = np.size(x)
-
-    # Set upper bound first
-    if prior_prec_log > 0:
-        upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
-    else:
-        upper = fallback_upper
-
-    # Use Brent method to find root of score function
-    r_hat = optimize.brentq(f=score_profile_posterior_nbinom,
-                            a=np.sqrt(EPS), b=upper,
-                            args=(x, False, prior_a, prior_b,
-                                  prior_mean_log, prior_prec_log))
+    
+    r_hat, p_hat = map_estimator_nbinom(x=x, prior_a=prior_a, prior_b=prior_b,
+                                        prior_mean_log=prior_mean_log,
+                                        prior_prec_log=prior_prec_log,
+                                        brent_scale=brent_scale,
+                                        fallback_upper=fallback_upper)
 
     if profile:
         # Propose based on profile posterior for r and exact conditional
@@ -1159,11 +1218,6 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     else:
         # Propose using a bivariate normal approximate to the joint conditional
         # posterior of (r, p)
-
-        # Compute posterior mode of p
-        A = np.mean(x) + (prior_a- 1.)/n
-        B = r_hat + (prior_b - 1.)/n
-        p_hat = A / (A + B)
 
         # Compute posterior information matrix for parameters
         info = info_posterior_nbinom(r=r_hat, p=p_hat, x=x, transform=True,
