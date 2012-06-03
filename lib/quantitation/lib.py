@@ -1105,7 +1105,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
 
     Can propose from approximation to joint conditional posterior
     (profile=False) or approximately marginalize over the p parameter (by
-    profiling) and propose the p given shape exactly (profile=True).
+    profiling) and propose the p given r exactly (profile=True).
 
     Returns a 3-tuple consisting of the new r, new p, and a boolean indicating
     acceptance.
@@ -1174,7 +1174,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
         # density calculations
         U = linalg.cholesky(info, lower=False)
 
-        # Propose shape and rate parameter jointly
+        # Propose r and p jointly
         theta_hat   = np.log(np.array([r_hat, p_hat]))
         z_prop      = np.random.randn(2)
         theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
