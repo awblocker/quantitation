@@ -1120,7 +1120,8 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
         upper = fallback_upper
 
     # Use Brent method to find root of score function
-    r_hat = optimize.brentq(f=score_profile_posterior_nbinom, a=EPS, b=upper,
+    r_hat = optimize.brentq(f=score_profile_posterior_nbinom,
+                            a=np.sqrt(EPS), b=upper,
                             args=(x, False, prior_a, prior_b,
                                   prior_mean_log, prior_prec_log))
 
@@ -1176,6 +1177,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
 
         # Propose r and p jointly
         theta_hat   = np.log(np.array([r_hat, p_hat]))
+        theta_hat[1] -= np.log(1.-p_hat)
         z_prop      = np.random.randn(2)
         theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
         r_prop, p_prop = np.exp(theta_prop)
@@ -1183,7 +1185,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
 
         # Demean and decorrelate previous draws
         theta_prev  = np.log(np.array([r_prev, p_prev]))
-        theta_prev[1] = theta_prev[1] - np.log(1.-p_prev)
+        theta_prev[1] -= np.log(1.-p_prev)
         z_prev      = np.dot(U, theta_prev - theta_hat)
 
         # Compute log-ratio of proposal densities
