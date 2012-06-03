@@ -981,7 +981,7 @@ def rgibbs_mu(gamma_bar, tausq, n_peptides, prior_mean=0., prior_prec=0.):
                           size=gamma_bar.size)
     return mu
 
-def rgibbs_variances(rss, n, alpha=1., beta=0.):
+def rgibbs_variances(rss, n, shape=1., rate=0.):
     '''
     Gibbs update for variances given all other parameters.
     Used for sigmasq (state-level variances) and tausq (peptide-level
@@ -1001,8 +1001,8 @@ def rgibbs_variances(rss, n, alpha=1., beta=0.):
     The dimensionality of the draw is determined by the size of rss.
     All other inputs must be compatible in size.
     '''
-    variances = 1. / np.random.gamma(shape=alpha + n/2.,
-                                     scale=1./(beta + rss/2.),
+    variances = 1. / np.random.gamma(shape=shape + n/2.,
+                                     scale=1./(rate + rss/2.),
                                      size=np.size(rss))
     return variances
 
