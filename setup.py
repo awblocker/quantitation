@@ -9,5 +9,6 @@ setup(name='quantitation',
       author='Alexander W Blocker',
       author_email='ablocker@gmail.com',
       packages=['quantitation','quantitation.glm'],
-      package_dir = {'': 'lib'}
+      package_dir = {'': 'lib'},
+      requires=['numpy(>=1.6)','scipy(>=0.9)']
       )
