@@ -355,7 +355,7 @@ def score_profile_posterior_nbinom(r, x, log=False, prior_a=1., prior_b=1.,
     A = np.mean(x) + (prior_a- 1.)/n
     B = r + (prior_b - 1.)/n
     p_hat = A / (A + B)
-    
+
     # Compute score for r
     score = (n*np.log(1.-p_hat) + np.sum(special.polygamma(0, x+r))
              - n*special.polygamma(0,r))
@@ -528,8 +528,8 @@ def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
 # Optimization and root-finding routines
 #==============================================================================
 
-def vectorizedBisection(f, lower, upper, f_args=tuple(), f_kwargs={},
-                        tol=1e-10, maxIter=100, full_output=False):
+def vectorized_bisection(f, lower, upper, f_args=tuple(), f_kwargs={},
+                         tol=1e-10, maxIter=100, full_output=False):
     '''
     Find vector of roots of vectorized function using bisection.
     f should be a vectorized function that takes arguments x and f_args of
@@ -616,7 +616,7 @@ def halley(f, fprime, f2prime, x0, f_args=tuple(), f_kwargs={},
 # Numerical integration functions
 #==============================================================================
 
-def laplaceApprox(f, xhat, info, f_args=tuple(), f_kwargs={}):
+def laplace_approx(f, xhat, info, f_args=tuple(), f_kwargs={}):
     '''
     Computes Laplace approximation to integral of f over real line.
     Takes mode xhat and observed information info as inputs.
@@ -633,7 +633,7 @@ def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
                         prior_mean_log=0., prior_prec_log=0.,
                         brent_scale=6., fallback_upper=10000.):
     '''
-    Maximum a posteriori estimator for shape and rate parameters of gamma 
+    Maximum a posteriori estimator for shape and rate parameters of gamma
     distribution.
 
     Assumes a conjugate gamma prior on the rate parameter and an independent
@@ -655,11 +655,11 @@ def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
                                 a=np.sqrt(EPS), b=upper,
                                 args=(x, False, prior_shape, prior_rate,
                                       prior_mean_log, prior_prec_log))
-    
+
     # Compute posterior mode of rate
     rate_hat = ((shape_hat + (prior_shape-1.)/n) /
                 (np.mean(x) + prior_rate/n))
-    
+
     return (shape_hat, rate_hat)
 
 def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
@@ -676,7 +676,7 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
     '''
     # Compute posterior mode for r and p using profile log-posterior
     n = np.size(x)
-    
+
     # Set upper bound first
     if prior_prec_log > 0:
         upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
@@ -688,22 +688,22 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
                             a=np.sqrt(EPS), b=upper,
                             args=(x, False, prior_a, prior_b,
                                   prior_mean_log, prior_prec_log))
-    
+
     # Compute posterior mode of p
     A = np.mean(x) + (prior_a- 1.)/n
     B = r_hat + (prior_b - 1.)/n
     p_hat = A / (A + B)
-    
+
     return (r_hat, p_hat)
-    
+
 
 #==============================================================================
 # Specialized functions for marginalized missing data draws
 #==============================================================================
 
-def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
-                                      tol=1e-5, maxIter=200, bisectIter=10,
-                                      bisectScale=6.):
+def characterize_censored_intensity_dist(eta_0, eta_1, mu, sigmasq,
+                                         tol=1e-5, maxIter=200, bisectIter=10,
+                                         bisectScale=6.):
     '''
     Constructs Gaussian approximation to conditional posterior of censored
     intensity likelihood. Approximates marginal p(censored | params) via Laplace
@@ -726,10 +726,10 @@ def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
 
     # First, start with a bit of bisection to get in basin of attraction for
     # Halley's method
-    y_hat = vectorizedBisection(f=deriv_logdcensored, f_kwargs=dargs,
-                                lower=mu-bisectScale*np.sqrt(sigmasq),
-                                upper=mu+bisectScale*np.sqrt(sigmasq),
-                                tol=np.sqrt(tol), maxIter=bisectIter)
+    y_hat = vectorized_bisection(f=deriv_logdcensored, f_kwargs=dargs,
+                                 lower=mu-bisectScale*np.sqrt(sigmasq),
+                                 upper=mu+bisectScale*np.sqrt(sigmasq),
+                                 tol=np.sqrt(tol), maxIter=bisectIter)
 
     # Second, run Halley's method to find the censored intensity distribution's
     # mode to much higher precision.
@@ -743,8 +743,8 @@ def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
 
     # 3) Use Laplace approximation to approximate p(int. censoring); this is the
     # normalizing constant of the given conditional distribution
-    p_int_cen = laplaceApprox(f=dcensored, xhat=y_hat, info=info,
-                              f_kwargs=dargs)
+    p_int_cen = laplace_approx(f=dcensored, xhat=y_hat, info=info,
+                               f_kwargs=dargs)
 
     # Return dictionary containing combined result
     result = {'y_hat' : y_hat,
@@ -752,9 +752,9 @@ def characterizeCensoredIntensityDist(eta_0, eta_1, mu, sigmasq,
               'approx_sd' : approx_sd}
     return result
 
-def boundDensityRatio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
-                      normalizing_cnst, tol=1e-10, maxIter=100,
-                      bisectScale=1.):
+def bound_density_ratio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
+                        normalizing_cnst, tol=1e-10, maxIter=100,
+                        bisectScale=1.):
     '''
     Bound ratio of t proposal density to actual censored intensity density.
     This is used to construct an efficient, robust rejection sampler to exactly
@@ -816,14 +816,14 @@ def boundDensityRatio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
 
 
     # Find zeros that are less than y_hat using bisection.
-    left_roots = vectorizedBisection(f=deriv_logdensityratio, f_kwargs=dargs,
-                                     lower=left_lower, upper=left_upper,
-                                     tol=tol, maxIter=maxIter)
+    left_roots = vectorized_bisection(f=deriv_logdensityratio, f_kwargs=dargs,
+                                      lower=left_lower, upper=left_upper,
+                                      tol=tol, maxIter=maxIter)
 
     # Find zeros that are greater than y_hat using bisection.
-    right_roots = vectorizedBisection(f=deriv_logdensityratio, f_kwargs=dargs,
-                                     lower=right_lower, upper=right_upper,
-                                     tol=tol, maxIter=maxIter)
+    right_roots = vectorized_bisection(f=deriv_logdensityratio, f_kwargs=dargs,
+                                      lower=right_lower, upper=right_upper,
+                                      tol=tol, maxIter=maxIter)
 
     # Compute bounding factor M
     f_left_roots = densityratio(left_roots, normalizing_cnst=normalizing_cnst,
@@ -837,10 +837,10 @@ def boundDensityRatio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
     # Return results
     return M
 
-def rcensoredintensities(n_cen, mu, sigmasq, y_hat, approx_sd,
-                         p_int_cen, p_rnd_cen,
-                         eta_0, eta_1, propDf,
-                         tol=1e-10, maxIter=100):
+def r_intensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
+                      p_int_cen, p_rnd_cen,
+                      eta_0, eta_1, propDf,
+                      tol=1e-10, maxIter=100):
     '''
     Draw censored intensities and random censoring indicators given nCen and
     quantities computed from Laplace approximation
@@ -874,10 +874,10 @@ def rcensoredintensities(n_cen, mu, sigmasq, y_hat, approx_sd,
     # Drawing censored intensities
     # First, get the maximum of the target / proposal ratio for each set of
     # unique parameter values (not per state)
-    M = boundDensityRatio(eta_0=eta_0, eta_1=eta_1, mu=mu, sigmasq=sigmasq,
-                          y_hat=y_hat, approx_sd=approx_sd,
-                          normalizing_cnst=1./p_int_cen, propDf=propDf,
-                          tol=tol, maxIter=maxIter)
+    M = bound_density_ratio(eta_0=eta_0, eta_1=eta_1, mu=mu, sigmasq=sigmasq,
+                            y_hat=y_hat, approx_sd=approx_sd,
+                            normalizing_cnst=1./p_int_cen, propDf=propDf,
+                            tol=tol, maxIter=maxIter)
 
     # Next, draw randomly-censored intensities
     intensities[W==1] = np.random.normal(loc=mu[mapping[W==1]],
@@ -1047,7 +1047,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     # Compute posterior mode for shape and rate using profile log-posterior
     n = np.size(variances)
 
-    shape_hat, rate_hat = map_estimator_gamma(x=variances, 
+    shape_hat, rate_hat = map_estimator_gamma(x=variances,
                                               prior_shape=prior_shape,
                                               prior_rate=prior_rate,
                                               prior_mean_log=prior_mean_log,
@@ -1177,7 +1177,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     '''
     # Compute posterior mode for r and p using profile log-posterior
     n = np.size(x)
-    
+
     r_hat, p_hat = map_estimator_nbinom(x=x, prior_a=prior_a, prior_b=prior_b,
                                         prior_mean_log=prior_mean_log,
                                         prior_prec_log=prior_prec_log,
