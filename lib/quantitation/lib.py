@@ -160,12 +160,21 @@ def lp_profile_gamma(shape, x, prior_shape=1., prior_rate=0.,
 
 def dnbinom(x, r, p, log=False):
     '''
-    Noramlized PMF for negative binomial distribution. Parameterized s.t.
+    Normalized PMF for negative binomial distribution. Parameterized s.t.
     x >= 0, expectation is p*r/(1-p); variance is p*r/(1-p)**2.
     Syntax mirrors R.
     '''
     ld = (np.log(p)*x + np.log(1-p)*r + special.gammaln(x+r) -
           special.gammaln(x+1) - special.gammaln(r))
+    if log:
+        return ld
+    return np.exp(ld)
+
+def dbeta(x, a, b, log=False):
+    '''
+    Normalized PDF for beta distribution. Syntax mirrors R.
+    '''
+    ld = np.log(x)*(a-1.) + np.log(1.-x)*(b-1.) - special.betaln(a,b)
     if log:
         return ld
     return np.exp(ld)
@@ -1079,4 +1088,133 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
                      log_target_ratio=log_target_ratio,
                      log_prop_ratio=log_prop_ratio)
 
+def rmh_nbinom_hyperparams(x, r_prev, p_prev,
+                           prior_mean_log=2.65, prior_prec_log=1./0.652**2,
+                           prior_a=1., prior_b=1.,
+                           brent_scale=6., fallback_upper=10000.,
+                           profile=False):
+    '''
+    Metropolis-Hastings steps for negative-binomial hyperparameters given all
+    other parameters.
 
+    Using a log-normal prior for the r (convolution) hyperparameter and a
+    conditionall-conjugate beta prior for p.
+
+    Proposing from normal approximation to the conditional posterior
+    (conditional independence chain). Parameters are log-transformed.
+
+    Can propose from approximation to joint conditional posterior
+    (profile=False) or approximately marginalize over the p parameter (by
+    profiling) and propose the p given shape exactly (profile=True).
+
+    Returns a 3-tuple consisting of the new r, new p, and a boolean indicating
+    acceptance.
+    '''
+    # Compute posterior mode for r and p using profile log-posterior
+    n = np.size(x)
+
+    # Set upper bound first
+    if prior_prec_log > 0:
+        upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
+    else:
+        upper = fallback_upper
+
+    # Use Brent method to find root of score function
+    r_hat = optimize.brentq(f=score_profile_posterior_nbinom, a=EPS, b=upper,
+                            args=(x, False, prior_a, prior_b,
+                                  prior_mean_log, prior_prec_log))
+
+    if profile:
+        # Propose based on profile posterior for r and exact conditional
+        # posterior for p.
+
+        # Compute proposal variance
+        var_prop = 1./info_profile_posterior_nbinom(r=r_hat, x=x, log=True,
+                                           prior_a=prior_a, prior_b=prior_b,
+                                           prior_mean_log=prior_mean_log,
+                                           prior_prec_log=prior_prec_log)
+
+        # Propose r parameter from log-normal
+        r_prop = r_hat*np.exp(np.sqrt(var_prop)*np.random.randn(1))
+
+        # Propose p parameter given r from exact beta conditional posterior
+        p_prop = np.random.beta(a=np.sum(x) + prior_a - 1.,
+                                b=n*r_prop + prior_b - 1.)
+
+        # Compute log-ratio of proposal densities
+
+        # For proposal, start with log-normal proposal for r
+        log_prop_ratio = (dlnorm(r_prop, mu=np.log(r_hat),
+                                 sigmasq=var_prop, log=True) -
+                          dlnorm(r_prev, mu=np.log(r_hat),
+                                 sigmasq=var_prop, log=True))
+        # Then, add conditional beta proposal for p
+        log_prop_ratio += (dbeta(p_prop, a=np.sum(x) + prior_a - 1.,
+                                 b=n*r_prop + prior_b - 1.,
+                                 log=True) -
+                           dbeta(p_prev, a=np.sum(x) + prior_a - 1.,
+                                 b=n*r_prev + prior_b - 1.,
+                                 log=True))
+    else:
+        # Propose using a bivariate normal approximate to the joint conditional
+        # posterior of (r, p)
+
+        # Compute posterior mode of p
+        A = np.mean(x) + (prior_a- 1.)/n
+        B = r_hat + (prior_b - 1.)/n
+        p_hat = A / (A + B)
+
+        # Compute posterior information matrix for parameters
+        info = info_posterior_nbinom(r=r_hat, p=p_hat, x=x, transform=True,
+                                     prior_a=prior_a, prior_b=prior_b,
+                                     prior_mean_log=prior_mean_log,
+                                     prior_prec_log=prior_prec_log)
+
+        # Cholesky decompose information matrix for bivariate draw and
+        # density calculations
+        U = linalg.cholesky(info, lower=False)
+
+        # Propose shape and rate parameter jointly
+        theta_hat   = np.log(np.array([r_hat, p_hat]))
+        z_prop      = np.random.randn(2)
+        theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
+        r_prop, p_prop = np.exp(theta_prop)
+        p_prop = p_prop / (1. + p_prop)
+
+        # Demean and decorrelate previous draws
+        theta_prev  = np.log(np.array([r_prev, p_prev]))
+        theta_prev[1] = theta_prev[1] - np.log(1.-p_prev)
+        z_prev      = np.dot(U, theta_prev - theta_hat)
+
+        # Compute log-ratio of proposal densities
+
+        # These are transformed bivariate normals with equivalent covariance
+        # matrices, so the resulting Jacobian terms cancel. We are left to
+        # contend with the z's and the Jacobian terms resulting from the
+        # exponential and logit transformations.
+        log_prop_ratio = np.sum(dnorm(z_prop, log=True) -
+                                dnorm(z_prev, log=True))
+        log_prop_ratio += -(np.log(r_prop) - np.log(r_prev))
+        log_prop_ratio += -(np.log(p_prop) + np.log(1.-p_prop)
+                            -np.log(p_prev) - np.log(1.-p_prev))
+
+    # Compute log-ratio of target densities.
+    # This is equivalent for both proposals.
+
+    # For target, start with the likelihood for x
+    log_target_ratio = np.sum(dnbinom(x, r=r_prop, p=p_prop, log=True) -
+                              dnbinom(x, r=r_prev, p=p_prev, log=True))
+    if prior_prec_log > 0:
+        # Add the log-normal prior on r
+        log_target_ratio += (dlnorm(r_prop, mu=prior_mean_log,
+                                    sigmasq=1./prior_prec_log) -
+                             dlnorm(r_prev, mu=prior_mean_log,
+                                    sigmasq=1./prior_prec_log))
+    # Add the beta prior on p
+    log_target_ratio += (dbeta(p_prop, a=prior_a, b=prior_b, log=True) -
+                         dbeta(p_prev, a=prior_a, b=prior_b, log=True))
+
+    # Execute MH update
+    return mh_update(prop=(r_prop, p_prop), prev=(r_prev, p_prev),
+                     log_target_ratio=log_target_ratio,
+                     log_prop_ratio=log_prop_ratio)
