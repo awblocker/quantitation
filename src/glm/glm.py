@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 from scipy import linalg
 import links
@@ -58,10 +60,43 @@ def wls(X, y, w, method='cholesky'):
     else:
         return {'b':b, 'R':R, 'resid':resid}
 
-def glm(y, X, family, w=1, offset=0, cov=False, tol=1e-8, maxIter=100,
-        ls_method='cholesky'):
+def glm(y, X, family, w=1, offset=0, cov=False, info=False,
+        tol=1e-8, maxIter=100, ls_method='cholesky'):
     '''
     GLM estimation using IRLS
+    
+    y must be a vector of length n consisting of responses.
+    
+    X must be a (n x p) matrix consisting of covariates. It must include a
+    column of ones if you want to fit an intercept.
+    
+    family must be a Family instance.
+ 
+    w is an optional vector of length n consisting of inverse-variance weights.
+    
+    offset is an optional scalar or vector of length n consisting of offsets for
+    the linear predictor term.
+    
+    cov and info are switches to return the approximate covariance matrix of the 
+    coefficients (as V) and the Fisher information matrix for the coefficients
+    (as I).
+    
+    tol is the convergence tolerance for the IRLS iterations. The iterations
+    stop when |dev - dev_last| / (|dev| + 0.1) < tol.
+    
+    maxIter is the maximum number of IRLS iterations to use.
+    
+    ls_method is the method to use in wls() calls. The only valid values are
+    'cholesky' and 'qr'.
+    
+    This returns a dictionary consisting of:
+        - b_hat, the estimated coefficients
+        - mu, the fitted means
+        - eta, the fitted linear predictor values
+        - deviance, the deviance at convergence
+        - iterations, the number of iterations used
+        - V, the approximate covariance matrix, if cov
+        - I, the estimated Fisher information matrix, if info
     '''
     # Get dimensions
     n = X.shape[0]
@@ -108,9 +143,18 @@ def glm(y, X, family, w=1, offset=0, cov=False, tol=1e-8, maxIter=100,
     # Start building return value
     result = {'eta' : eta,
               'mu'  : mu,
-              'b'   : fit['b'],
+              'b_hat'   : fit['b'],
               'deviance' : dev,
-              'iteration' : iteration}
+              'iterations' : iteration}
+    
+    # Compute Fisher information, if requested
+    if info:
+        if ls_method=='cholesky':
+            I = np.dot(fit['L'], fit['L'].T)
+        else:
+            I = np.dot(fit['R'].T, fit['R'])
+        
+        result['I'] = I
     
     # Compute approximate covariance, if requested
     if cov:
@@ -127,5 +171,80 @@ def glm(y, X, family, w=1, offset=0, cov=False, tol=1e-8, maxIter=100,
     
     return result
     
+def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
+                       prior_log_density=None, prior_args=tuple(),
+                       prior_kwargs={}, **kwargs):
+    '''
+    Execute single Metropolis-Hastings step for GLM coefficients using normal
+    approximation to their posterior distribution.
     
+    At least one of I (the Fisher information) and V (the inverse Fisher 
+    information) must be provided. If I is provided, V is ignored. It is more
+    efficient to provide the information matrix than the covariance matrix.
     
+    Assumes a flat prior on the coefficients by default. Aritrary priors can be
+    used via the prior_log_density argument, which must be a function taking a
+    numpy array (of coefficients) as its first arguments. This function is
+    called as:
+            prior_log_density(b, *prior_args, **prior_kwargs)
+    
+    Returns a 2-tuple consisting of the resulting coefficients and a boolean
+    indicating acceptance.
+    '''
+    # Check for valid precision and/or covariance matrix arguments
+    if I is None and V is None:
+        raise ValueError('I or V must be specified')
+    elif I is not None and V is not None:
+        warnings.warn('Only Fisher information I will be used')
+    
+    # Get dimensions
+    n = X.shape[0]
+    p = X.shape[1]
+    
+    # Compute Cholesky decomposition of information matrix
+    if I is not None:
+        # Easy case; information matrix provided
+        L = linalg.cholesky(I, lower=True)
+    else:
+        # Harder case; have inverse of information matrix
+        L = linalg.cholesky(linalg.inv(V), lower=True)
+    
+    # Propose from multivariate normal with appropriate mean and covariance
+    z_prop = np.random.randn(p)
+    b_prop = b_hat + linalg.solve_triangular(L, z_prop, lower=True)
+    
+    # Demean and decorrelate previous draw of b
+    z_prev = np.dot(L.T, b_prev - b_hat)
+    
+    # Compute proposed and previous means
+    eta_prop = np.dot(X, b_prop)
+    eta_prev = np.dot(X, b_prev)
+    
+    mu_prop = family.link.inv(eta_prop)
+    mu_prev = family.link.inv(eta_prev)
+    
+    # Compute log-ratio of target densities
+    log_target_ratio = np.sum(family.loglik(y=y, mu=mu_prop, w=w) -
+                              family.loglik(y=y, mu=mu_prev, w=w))
+    
+    # Add ratio of priors, if prior_log_density is supplied
+    if prior_log_density is not None:
+        log_target_ratio += (prior_log_density(b_prop, *prior_args,
+                                               **prior_kwargs) -
+                             prior_log_density(b_prev, *prior_args,
+                                               **prior_kwargs))
+    
+    # Compute log-ratio of proposal densities. This is very easy with the
+    # demeaned and decorrelated values z.
+    log_prop_ratio = -0.5*np.sum(z_prop**2 - z_prev**2)
+    
+    # Compute acceptance probability
+    log_accept_prob = log_target_ratio - log_prop_ratio
+    
+    # Accept proposal with given probability
+    accept = (np.log(np.random.uniform(size=1)) < log_accept_prob)
+    
+    if accept:
+        return (b_prop, True)
+    else:
+        return (b_prev, False)
