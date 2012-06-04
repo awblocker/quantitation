@@ -843,7 +843,16 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
                      tol=1e-10, maxIter=100):
     '''
     Draw censored intensities and random censoring indicators given nCen and
-    quantities computed from Laplace approximation
+    quantities computed from Laplace approximation.
+    
+    Returns
+    -------
+        - intensities : ndarray
+            A 1d ndarray of sampled censored intensities
+        - mapping : ndarray
+            A 1d integer ndarray of peptide indices, one per censored state
+        - W : ndarray
+            A 1d integer ndarray of indicators for random censoring
     '''
     # Setup data structures for draws
     n_states = np.sum(n_cen)
@@ -911,10 +920,7 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
         active[active]  = u > accept_prob
 
     # Build output
-    out = {'mapping' : mapping,
-           'W' : W,
-           'intensities' : intensities}
-    return out
+    return (intensities, mapping, W)
 
 #==============================================================================
 # Generic MH updates
