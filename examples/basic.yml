@@ -49,4 +49,6 @@ init:
 settings:
     n_iterations: 100
     propDf: 3.
+    verbose: 1
+    verbose_interval: 10
 

@@ -1,3 +1,5 @@
+import sys
+
 import numpy as np
 
 import lib
@@ -298,6 +300,10 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                                       family=logit_family,
                                                       **fit_eta)
         accept_stats['eta'] += accept
+        
+        if (cfg['settings']['verbose'] > 0 and
+            t % cfg['settings']['verbose_interval']==0):
+            print >> sys.stderr, 'Iteration %d complete' % t
         
     # Build dictionary of draws to return
     draws = {'mu' : mu_draws,
