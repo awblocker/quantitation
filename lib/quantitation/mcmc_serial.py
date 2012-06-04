@@ -82,6 +82,9 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     
     # Tabulate peptides per protein
     n_peptides_per_protein = np.bincount(mapping_peptides)
+    peptides_obs = np.unique(mapping_states_obs)
+    n_obs_peptides_per_protein = np.bincount(mapping_peptides[peptides_obs],
+                                             minlength=n_proteins)
 
     # Tabulate number of observed states per peptide
     n_obs_states_per_peptide = np.bincount(mapping_states_obs,
@@ -136,8 +139,9 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     # Number of states parameters from MAP estimator based on number of observed
     # peptides; very crude, but not altogether terrible. Note that this ignores
     # the +1 location shift in the actual n_states distribution.
-    r[0], lmbda[0] = lib.map_estimator_nbinom(x=n_obs_states_per_peptide,
-                                              **cfg['priors']['n_states_dist'])
+    kwargs = {'x' : n_obs_states_per_peptide[n_obs_states_per_peptide>0]-1}
+    kwargs.update(cfg['priors']['n_states_dist'])
+    r[0], lmbda[0] = lib.map_estimator_nbinom(**kwargs)
 
     # Hyperparameters for state- and peptide-level variance distributions
     # directly from cfg
@@ -157,12 +161,18 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     # Mapping from protein to peptide conditional variances for convenience
     var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
     
-    # Peptide- and protein-level means using mean observed intensity; excluding
-    # missing states and imputing missing peptides as zero
-    gamma_draws[0]  = (total_intensity_obs_per_peptide / 
-                       np.maximum(1, n_obs_states_per_peptide))
-    mu_draws[0]     = (np.bincount(mapping_peptides, gamma_draws[0]) /
-                       n_peptides_per_protein)
+    # Protein-level means using mean observed intensity; excluding missing 
+    # peptides
+    mu_draws[0]     = (np.bincount(mapping_peptides,
+                                   total_intensity_obs_per_peptide /
+                                   np.maximum(1,n_obs_states_per_peptide)) /
+                       n_obs_peptides_per_protein)
+    
+    # Peptide-level means using mean observed intensity; imputing missing
+    # peptides as protein observed means
+    gamma_draws[0] = mu_draws[0][mapping_peptides]
+    gamma_draws[0][peptides_obs] = (total_intensity_obs_per_peptide[peptides_obs] / 
+                                    n_obs_states_per_peptide[peptides_obs])
                        
     # Instantiate GLM family for eta step
     logit_family = glm.families.Binomial(link=glm.links.Logit)
