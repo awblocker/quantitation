@@ -3,7 +3,7 @@ import numpy as np
 import lib
 import glm
 
-def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
+def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     '''
     Serial MCMC sampler for posterior of state-level censoring model.
 
@@ -12,9 +12,9 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
         - intensities_obs : array_like
             A 1d array of length n_obs_states for which each entry contains the
             observed (summed) log state intensity.
-            This must be aligned to mapping_states and all entires must be
+            This must be aligned to mapping_states_obs and all entires must be
             > -inf; no missing peptides.
-        - mapping_states : array_like, 1 dimension, nonnegative ints
+        - mapping_states_obs : array_like, 1 dimension, nonnegative ints
             A 1d integer array of length n_obs_states for which each entry
             contains the index of the peptide that corresponds to the given
             observed state. Peptide indices can range over 0 <= i < n_peptides.
@@ -46,8 +46,8 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
     # Convert inputs to np.ndarrays as needed
     if type(intensities_obs) is not np.ndarray:
         intensities_obs = np.asanyarray(intensities_obs)
-    if type(mapping_states) is not np.ndarray:
-        mapping_states = np.asanyarray(mapping_states, dtype=np.int)
+    if type(mapping_states_obs) is not np.ndarray:
+        mapping_states_obs = np.asanyarray(mapping_states_obs, dtype=np.int)
     if type(mapping_peptides) is not np.ndarray:
         mapping_peptides = np.asanyarray(mapping_peptides, dtype=np.int)
 
@@ -61,10 +61,10 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
     n_proteins = 1 + np.max(mapping_peptides)
 
     # Check for validity of mapping vectors
-    if (not issubclass(mapping_states.dtype, np.integer) or
-        np.min(mapping_states) < 0 or
-        np.max(mapping_states) > n_peptides - 1):
-        raise ValueError('State to peptide mapping (mapping_states)'
+    if (not issubclass(mapping_states_obs.dtype, np.integer) or
+        np.min(mapping_states_obs) < 0 or
+        np.max(mapping_states_obs) > n_peptides - 1):
+        raise ValueError('State to peptide mapping (mapping_states_obs)'
                          ' is not valid')
 
     if (not issubclass(mapping_peptides.dtype, np.integer) or
@@ -78,17 +78,14 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
     # Tabulate peptides per protein
     n_peptides_per_protein = np.bincount(mapping_peptides)
 
-    # Tabulate number of observed states per peptide and per protein
-    n_obs_states_per_peptide = np.bincount(mapping_states, minlength=n_peptides)
-    n_obs_states_per_protein = np.bincount(mapping_peptides,
-                                           weights=n_obs_states_per_peptide)
+    # Tabulate number of observed states per peptide
+    n_obs_states_per_peptide = np.bincount(mapping_states_obs,
+                                           minlength=n_peptides)
 
-    # Sum observed intensities per peptide and per protein
-    total_intensity_obs_per_peptide = np.bincount(mapping_states,
+    # Sum observed intensities per peptide
+    total_intensity_obs_per_peptide = np.bincount(mapping_states_obs,
                                                   weights=intensities_obs,
                                                   minlength=n_peptides)
-    total_intensity_obs_per_protein = np.bincount(mapping_peptides,
-                                      weights=total_intensity_obs_per_peptide)
 
     # Allocate data structures for draws
 
@@ -124,7 +121,8 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
     # eta from cfg; bivariate normal draw
     with cfg['init']['eta'] as eta0:
         eta_draws[0,0] = eta0['mean'][0] + eta0['sd'][0]*np.random.randn(1)
-        eta_draws[0,1] = (eta0['mean'][1] + eta0['cor']*eta0['sd'][1]/eta0['sd'][0]*
+        eta_draws[0,1] = (eta0['mean'][1] +
+                          eta0['cor']*eta0['sd'][1]/eta0['sd'][0]*
                           (eta_draws[0,0] - eta0['mean'][0]))
         eta_draws[0,1] += (np.sqrt(1.-eta0['cor']**2) * eta0['sd'][1] *
                            np.random.randn(1))
@@ -160,7 +158,7 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
     # Master loop for MCMC iterations
     for t in xrange(1, n_iterations):
         # (1) Draw missing data (n_cen and censored state intensities) given all
-        #   other parameters.
+        #   other parameters. Exact draw via rejection samplers.
 
         # (1a) Obtain p_int_cen per peptide and approximatations of censored
         #   intensity posteriors.
@@ -176,16 +174,83 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
                                              p_int_cen=cen_dist['p_int_cen'],
                                              lmbda=lmbda[t-1], r=r[t-1])
         # Update state-level counts
-        n_cen_states_per_protein = np.bincount(mapping_peptides,
-                                               weights=n_cen_states_per_peptide)
         n_states_per_peptide = (n_obs_states_per_peptide +
                                 n_cen_states_per_peptide)
-        n_states_per_protein = (n_obs_states_per_protein +
-                                n_cen_states_per_protein)
+        n_states = np.sum(n_states_per_peptide)
         
         # (1c) Draw censored intensities
-        intensities_cen
-    
+        kwargs['n_cen'] = n_cen_states_per_peptide
+        kwargs['p_rnd_cen'] = p_rnd_cen[t-1]
+        kwargs['propDf'] = cfg['settings']['propDf']
+        intensities_cen, mapping_states_cen, W = lib.rintensities_cen(**kwargs)
+        
+        
+        # (2) Update random censoring probability. Gibbs step.
+        p_rnd_cen[t] = lib.rgibbs_p_rnd_cen(n_rnd_cen=np.sum(W),
+                                            n_states=n_states,
+                                            **cfg['priors']['p_rnd_cen'])
+        
+        
+        # Sum observed intensities per peptide
+        total_intensity_cen_per_peptide = np.bincount(mapping_states_cen,
+                                                      weights=intensities_cen,
+                                                      minlength=n_peptides)
+        
+        # Compute mean intensities per peptide
+        mean_intensity_per_peptide = ((total_intensity_obs_per_peptide +
+                                       total_intensity_cen_per_peptide) /
+                                       n_states_per_peptide)
+                                       
+                                       
+        # (3) Update peptide-level mean parameters (gamma). Gibbs step.
+        gamma_draws[t] = lib.rgibbs_gamma(mu=mu_draws[t-1],
+                                          tausq=tausq_draws[t-1],
+                                          sigmasq=sigmasq_draws[t-1],
+                                          y_bar=mean_intensity_per_peptide,
+                                          n_states=n_states)
+        mean_gamma_by_protein = np.bincount(mapping_peptides,
+                                            weights=gamma_draws[t])
+        mean_gamma_by_protein /= n_peptides_per_protein
+        
+        
+        # (4) Update protein-level mean parameters (mu). Gibbs step.
+        mu_draws[t] = lib.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
+                                    tausq=tausq_draws[t-1],
+                                    n_peptides=n_peptides,
+                                    **cfg['priors']['mu'])
+        
+        
+        # (5) Update state-level variance parameters (sigmasq). Gibbs step.
+        rss = np.sum((intensities_obs - gamma_draws[t,mapping_states_obs])**2)
+        rss += np.sum((intensities_cen - gamma_draws[t,mapping_states_cen])**2)
+        sigmasq_draws[t] = lib.rgibbs_variances(rss=rss, n=n_states,
+                                                prior_shape=shape_sigmasq[t-1],
+                                                prior_rate=rate_sigmasq[t-1])
+        
+        
+        # (6) Update peptide-level variance parameters (tausq). Gibbs step.
+        rss = np.sum((gamma_draws[t] - mu_draws[t,mapping_peptides])**2)
+        tausq_draws[t] = lib.rgibbs_variances(rss=rss, n=n_peptides,
+                                              prior_shape=shape_tausq[t-1],
+                                              prior_rate=rate_tausq[t-1])
+        
+        
+        # (7) Update state-level variance hyperparameters (sigmasq
+        #   distribution). Conditional independence-chain MH step.
+        
+        
+        # (8) Update peptide-level variance hyperparameterse (tausq
+        #   distribution). Conditional independence-chain MH step.
+        
+        
+        # (9) Update parameter for negative-binomial n_states distribution (r
+        #   and lmbda). Conditional independence-chain MH step.
+        
+        
+        # (10) Update coefficients of intensity-based probabilistic censoring
+        #   model (eta). Conditional independence-chain MH step.
+                
+        
     # Build dictionary of draws to return
     draws = {'mu' : mu_draws,
              'gamma' : gamma_draws,
