@@ -1069,6 +1069,8 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     Can propose from approximation to joint conditional posterior
     (profile=False) or approximately marginalize over the rate parameter (by
     profiling) and propose the rate given shape exactly (profile=True).
+    Falls back to profile if information matrix is not (numerically) positive
+    definite.
 
     Returns a 2-tuple consisting of the new (shape, rate) and a boolean
     indicating acceptance.
@@ -1083,42 +1085,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
                                               prior_prec_log=prior_prec_log,
                                               brent_scale=brent_scale,
                                               fallback_upper=fallback_upper)
-
-    if profile:
-        # Propose based on profile posterior for shape and exact conditional
-        # posterior for rate.
-
-        # Compute proposal variance
-        var_prop = 1./info_profile_posterior_gamma(shape=shape_hat,
-                                           x=variances, log=True,
-                                           prior_shape=prior_shape,
-                                           prior_rate=prior_rate,
-                                           prior_mean_log=prior_mean_log,
-                                           prior_prec_log=prior_prec_log)
-
-        # Propose shape parameter from log-normal
-        shape_prop = shape_hat*np.exp(np.sqrt(var_prop)*np.random.randn(1))
-
-        # Propose rate parameter given shape from exact gamma conditional
-        # posterior
-        rate_prop = np.random.gamma(shape=n*shape_prop + prior_shape,
-                                    scale=1./(np.sum(variances) + prior_rate))
-
-        # Compute log-ratio of proposal densities
-
-        # For proposal, start with log-normal proposal for shape
-        log_prop_ratio = (dlnorm(shape_prop, mu=np.log(shape_hat),
-                                 sigmasq=var_prop, log=True) -
-                          dlnorm(shape_prev, mu=np.log(shape_hat),
-                                 sigmasq=var_prop, log=True))
-        # Then, add conditional gamma proposal for rate
-        log_prop_ratio += (dgamma(rate_prop, shape=n*shape_prop + prior_shape,
-                                  rate=np.sum(variances) + prior_rate,
-                                  log=True) -
-                           dgamma(rate_prev, shape=n*shape_prop + prior_shape,
-                                  rate=np.sum(variances) + prior_rate,
-                                  log=True))
-    else:
+    if not profile:
         # Propose using a bivariate normal approximate to the joint conditional
         # posterior of (shape, rate)
 
@@ -1132,30 +1099,76 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
 
         # Cholesky decompose information matrix for bivariate draw and
         # density calculations
-        U = linalg.cholesky(info, lower=False)
+        # Cholesky decompose information matrix for bivariate draw and
+        # density calculations
+        try:
+            U = linalg.cholesky(info, lower=False)
+        except:
+            # Fallback to profile draw
+            profile = True
+        
+        if not profile:
+            # Propose shape and rate parameter jointly
+            theta_hat   = np.log(np.array([shape_hat, rate_hat]))
+            z_prop = (np.random.randn(2) / 
+                      np.sqrt(np.random.gamma(shape=propDf/2., scale=2.,
+                                              size=2) / propDf))
+            theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
+            shape_prop, rate_prop = np.exp(theta_prop)
+    
+            # Demean and decorrelate previous draws
+            theta_prev  = np.log(np.array([shape_prev, rate_prev]))
+            z_prev      = np.dot(U, theta_prev - theta_hat)
+    
+            # Compute log-ratio of proposal densities
+    
+            # These are transformed bivariate t's with equivalent covariance        
+            # matrices, so the resulting Jacobian terms cancel. We are left to
+            # contend with the z's and the Jacobian terms resulting from
+            # exponentiation.
+            log_prop_ratio = -np.sum(np.log(1. + z_prop**2/propDf)-
+                                     np.log(1. + z_prev**2 /propDf))
+            log_prop_ratio *= (propDf+1.)/2.
+            log_prop_ratio += -np.sum(theta_prop - theta_prev)
+            
+    if profile:
+        # Propose based on profile posterior for shape and exact conditional
+        # posterior for rate.
 
-        # Propose shape and rate parameter jointly
-        theta_hat   = np.log(np.array([shape_hat, rate_hat]))
-        z_prop = (np.random.randn(2) / 
-                  np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=2) /
+        # Compute proposal variance
+        var_prop = 1./info_profile_posterior_gamma(shape=shape_hat,
+                                           x=variances, log=True,
+                                           prior_shape=prior_shape,
+                                           prior_rate=prior_rate,
+                                           prior_mean_log=prior_mean_log,
+                                           prior_prec_log=prior_prec_log)
+
+        # Propose shape parameter from log-t
+        z_prop = (np.random.randn(1) /
+                  np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=1) /
                           propDf))
-        theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
-        shape_prop, rate_prop = np.exp(theta_prop)
+        shape_prop = shape_hat*np.exp(np.sqrt(var_prop)*z_prop)
 
-        # Demean and decorrelate previous draws
-        theta_prev  = np.log(np.array([shape_prev, rate_prev]))
-        z_prev      = np.dot(U, theta_prev - theta_hat)
+        # Propose rate parameter given shape from exact gamma conditional
+        # posterior
+        rate_prop = np.random.gamma(shape=n*shape_prop + prior_shape,
+                                    scale=1./(np.sum(variances) + prior_rate))
 
         # Compute log-ratio of proposal densities
 
-        # These are transformed bivariate t's with equivalent covariance        
-        # matrices, so the resulting Jacobian terms cancel. We are left to
-        # contend with the z's and the Jacobian terms resulting from
-        # exponentiation.
-        log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2/propDf)-
-                                                np.log(1. + z_prev**2 /propDf))
-        log_prop_ratio += -np.sum(theta_prop - theta_prev)
-
+        # For proposal, start with log-t proposal for shape
+        log_prop_ratio = (dt(shape_prop, mu=np.log(shape_hat),
+                             scale=np.sqrt(var_prop), log=True) -
+                          dt(shape_prev, mu=np.log(shape_hat),
+                             scale=np.sqrt(var_prop), log=True))
+        # Then, add conditional gamma proposal for rate
+        log_prop_ratio += (dgamma(rate_prop, shape=n*shape_prop + prior_shape,
+                                  rate=np.sum(variances) + prior_rate,
+                                  log=True) -
+                           dgamma(rate_prev, shape=n*shape_prop + prior_shape,
+                                  rate=np.sum(variances) + prior_rate,
+                                  log=True))
+    
     # Compute log-ratio of target densities.
     # This is equivalent for both proposals.
 
@@ -1202,6 +1215,8 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     Can propose from approximation to joint conditional posterior
     (profile=False) or approximately marginalize over the p parameter (by
     profiling) and propose the p given r exactly (profile=True).
+    Falls back to profile if information matrix is not (numerically) positive
+    definite.
 
     Returns a 2-tuple consisting of the new (r, p) and a boolean indicating
     acceptance.
@@ -1215,39 +1230,8 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
                                         prior_prec_log=prior_prec_log,
                                         brent_scale=brent_scale,
                                         fallback_upper=fallback_upper)
-
-    if profile:
-        # Propose based on profile posterior for r and exact conditional
-        # posterior for p.
-
-        # Compute proposal variance
-        var_prop = 1./info_profile_posterior_nbinom(r=r_hat, x=x, log=True,
-                                           prior_a=prior_a, prior_b=prior_b,
-                                           prior_mean_log=prior_mean_log,
-                                           prior_prec_log=prior_prec_log)
-
-        # Propose r parameter from log-normal
-        r_prop = r_hat*np.exp(np.sqrt(var_prop)*np.random.randn(1))
-
-        # Propose p parameter given r from exact beta conditional posterior
-        p_prop = np.random.beta(a=np.sum(x) + prior_a - 1.,
-                                b=n*r_prop + prior_b - 1.)
-
-        # Compute log-ratio of proposal densities
-
-        # For proposal, start with log-normal proposal for r
-        log_prop_ratio = (dlnorm(r_prop, mu=np.log(r_hat),
-                                 sigmasq=var_prop, log=True) -
-                          dlnorm(r_prev, mu=np.log(r_hat),
-                                 sigmasq=var_prop, log=True))
-        # Then, add conditional beta proposal for p
-        log_prop_ratio += (dbeta(p_prop, a=np.sum(x) + prior_a - 1.,
-                                 b=n*r_prop + prior_b - 1.,
-                                 log=True) -
-                           dbeta(p_prev, a=np.sum(x) + prior_a - 1.,
-                                 b=n*r_prev + prior_b - 1.,
-                                 log=True))
-    else:
+                                        
+    if not profile:
         # Propose using a bivariate normal approximate to the joint conditional
         # posterior of (r, p)
 
@@ -1259,34 +1243,75 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
 
         # Cholesky decompose information matrix for bivariate draw and
         # density calculations
-        U = linalg.cholesky(info, lower=False)
+        try:
+            U = linalg.cholesky(info, lower=False)
+        except:
+            # Fallback to profile draw
+            profile = True
+        
+        if not profile:
+            # Propose r and p jointly
+            theta_hat   = np.log(np.array([r_hat, p_hat]))
+            theta_hat[1] -= np.log(1.-p_hat)
+            z_prop = (np.random.randn(2) / 
+                      np.sqrt(np.random.gamma(shape=propDf/2., scale=2.,
+                                              size=2) / propDf))
+            theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
+            r_prop, p_prop = np.exp(theta_prop)
+            p_prop = p_prop / (1. + p_prop)
+    
+            # Demean and decorrelate previous draws
+            theta_prev  = np.log(np.array([r_prev, p_prev]))
+            theta_prev[1] -= np.log(1.-p_prev)
+            z_prev      = np.dot(U, theta_prev - theta_hat)
+    
+            # Compute log-ratio of proposal densities
+    
+            # These are transformed bivariate t's with equivalent covariance
+            # matrices, so the resulting Jacobian terms cancel. We are left to
+            # contend with the z's and the Jacobian terms resulting from the
+            # exponential and logit transformations.
+            log_prop_ratio = -np.sum(np.log(1. + z_prop**2/propDf)-
+                                     np.log(1. + z_prev**2 /propDf))
+            log_prop_ratio *= (propDf+1.)/2.
+            log_prop_ratio += -(np.log(r_prop) - np.log(r_prev))
+            log_prop_ratio += -(np.log(p_prop) + np.log(1.-p_prop)
+                                -np.log(p_prev) - np.log(1.-p_prev))
+    
+    if profile:
+        # Propose based on profile posterior for r and exact conditional
+        # posterior for p.
 
-        # Propose r and p jointly
-        theta_hat   = np.log(np.array([r_hat, p_hat]))
-        theta_hat[1] -= np.log(1.-p_hat)
-        z_prop = (np.random.randn(2) / 
-                  np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=2) /
+        # Compute proposal variance
+        var_prop = 1./info_profile_posterior_nbinom(r=r_hat, x=x, log=True,
+                                           prior_a=prior_a, prior_b=prior_b,
+                                           prior_mean_log=prior_mean_log,
+                                           prior_prec_log=prior_prec_log)
+
+        # Propose r parameter from log-t
+        z_prop = (np.random.randn(1) /
+                  np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=1) /
                           propDf))
-        theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
-        r_prop, p_prop = np.exp(theta_prop)
-        p_prop = p_prop / (1. + p_prop)
+        r_prop = r_hat*np.exp(np.sqrt(var_prop)*z_prop)
 
-        # Demean and decorrelate previous draws
-        theta_prev  = np.log(np.array([r_prev, p_prev]))
-        theta_prev[1] -= np.log(1.-p_prev)
-        z_prev      = np.dot(U, theta_prev - theta_hat)
+        # Propose p parameter given r from exact beta conditional posterior
+        p_prop = np.random.beta(a=np.sum(x) + prior_a - 1.,
+                                b=n*r_prop + prior_b - 1.)
 
         # Compute log-ratio of proposal densities
 
-        # These are transformed bivariate t's with equivalent covariance
-        # matrices, so the resulting Jacobian terms cancel. We are left to
-        # contend with the z's and the Jacobian terms resulting from the
-        # exponential and logit transformations.
-        log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2/propDf)-
-                                                np.log(1. + z_prev**2 /propDf))
-        log_prop_ratio += -(np.log(r_prop) - np.log(r_prev))
-        log_prop_ratio += -(np.log(p_prop) + np.log(1.-p_prop)
-                            -np.log(p_prev) - np.log(1.-p_prev))
+        # For proposal, start with log-t proposal for r
+        log_prop_ratio = (dt(r_prop, mu=np.log(r_hat),
+                             scale=np.sqrt(var_prop), log=True) -
+                          dt(r_prev, mu=np.log(r_hat),
+                             scale=np.sqrt(var_prop), log=True))
+        # Then, add conditional beta proposal for p
+        log_prop_ratio += (dbeta(p_prop, a=np.sum(x) + prior_a - 1.,
+                                 b=n*r_prop + prior_b - 1.,
+                                 log=True) -
+                           dbeta(p_prev, a=np.sum(x) + prior_a - 1.,
+                                 b=n*r_prev + prior_b - 1.,
+                                 log=True))
 
     # Compute log-ratio of target densities.
     # This is equivalent for both proposals.
