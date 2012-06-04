@@ -102,7 +102,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     mu_draws        = np.empty((n_iterations, n_proteins))
     
     # Number of censored states per peptide
-    n_cen_states_per_peptide_draws = np.zeros((n_iterations, n_peptides))
+    n_cen_states_per_peptide_draws = np.zeros((n_iterations, n_peptides),
+                                              dtype=np.integer)
 
     # State- and peptide-level variances
     sigmasq_draws   = np.empty((n_iterations, n_proteins))
@@ -345,5 +346,9 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
              'r' : r,
              'sigmasq' : sigmasq_draws,
              'tausq' : tausq_draws,
-             'n_cen_states_per_peptide' : n_cen_states_per_peptide_draws}
+             'n_cen_states_per_peptide' : n_cen_states_per_peptide_draws,
+             'shape_tausq' : shape_tausq,
+             'rate_tausq' : rate_tausq,
+             'shape_sigmasq' : shape_sigmasq,
+             'rate_sigmasq' : rate_sigmasq}
     return (draws, accept_stats)
