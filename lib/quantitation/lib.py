@@ -377,7 +377,7 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
     Compute posterior information for r (convolution) and p parameters of
     negative-binomial distribution.
 
-    If transform, compute information for log(r) and logit(rate) instead.
+    If transform, compute information for log(r) and logit(p) instead.
     This is typically more useful, as the normal approximation holds much better
     on the transformed scale.
 
@@ -496,7 +496,7 @@ def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
     # Compute necessary bound for envelope condition
     bound = np.ones(m)
     if r < 1:
-        bound *= (n_obs + r - 1) / n_obs
+        bound[n_obs>0] *= (n_obs[n_obs>0] + r - 1) / n_obs[n_obs>0]
 
     # Run rejection sampling iterations
     nIter = 0
@@ -620,7 +620,7 @@ def laplace_approx(f, xhat, info, f_args=tuple(), f_kwargs={}):
     '''
     Computes Laplace approximation to integral of f over real line.
     Takes mode xhat and observed information info as inputs.
-    Fully comptatible with Numpy vector arguments so long as f is.
+    Fully compatible with Numpy vector arguments so long as f is.
     '''
     integral = np.sqrt(2.*np.pi / info) * f(xhat, *f_args, **f_kwargs)
     return integral
@@ -629,12 +629,13 @@ def laplace_approx(f, xhat, info, f_args=tuple(), f_kwargs={}):
 # Functions for commonly-used MAP estimates
 #==============================================================================
 
-def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
+def map_estimator_gamma(x, prior_shape=1., prior_rate=0., log=False,
                         prior_mean_log=0., prior_prec_log=0.,
                         brent_scale=6., fallback_upper=10000.):
     '''
     Maximum a posteriori estimator for shape and rate parameters of gamma
-    distribution.
+    distribution. If log, compute posterior mode for log(shape) and 
+    log(rate) instead.
 
     Assumes a conjugate gamma prior on the rate parameter and an independent
     log-normal prior on the shape parameter, each with the given parameters.
@@ -651,7 +652,7 @@ def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
         upper = fallback_upper
     
     # Verify that score is negative at upper bound
-    args=(x, False, prior_shape, prior_rate, prior_mean_log, prior_prec_log)
+    args=(x, log, prior_shape, prior_rate, prior_mean_log, prior_prec_log)
     while score_profile_posterior_gamma(upper, *args) > 0:
         upper *= 2.
 
@@ -661,17 +662,18 @@ def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
                                 args=args)
 
     # Compute posterior mode of rate
-    rate_hat = ((shape_hat + (prior_shape-1.)/n) /
+    rate_hat = ((shape_hat + (prior_shape-1.+log)/n) /
                 (np.mean(x) + prior_rate/n))
 
     return (shape_hat, rate_hat)
 
-def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
+def map_estimator_nbinom(x, prior_a=1., prior_b=1., transform=False,
                          prior_mean_log=0., prior_prec_log=0.,
                          brent_scale=6., fallback_upper=10000.):
     '''
     Maximum a posteriori estimator for r (convolution) parameter and p parameter
-    of negative binomial distribution.
+    of negative binomial distribution. If transform, compute posterior mode for
+    log(r) and logit(p) instead. 
 
     Assumes a conditionally conjugate beta prior on p and an independent
     log-normal prior on r, each with the given parameters.
@@ -688,19 +690,18 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
         upper = fallback_upper
     
     # Verify that score is negative at upper bound
-    args=(x, False, prior_a, prior_b, prior_mean_log, prior_prec_log)
+    args=(x, transform, prior_a, prior_b, prior_mean_log, prior_prec_log)
     while score_profile_posterior_nbinom(upper, *args) > 0:
         upper *= 2.
 
     # Use Brent method to find root of score function
     r_hat = optimize.brentq(f=score_profile_posterior_nbinom,
                             a=np.sqrt(EPS), b=upper,
-                            args=(x, False, prior_a, prior_b,
-                                  prior_mean_log, prior_prec_log))
+                            args=args)
 
     # Compute posterior mode of p
-    A = np.mean(x) + (prior_a- 1.)/n
-    B = r_hat + (prior_b - 1.)/n
+    A = np.mean(x) + (prior_a- 1.+transform)/n
+    B = r_hat + (prior_b - 1.+transform)/n
     p_hat = A / (A + B)
 
     return (r_hat, p_hat)
@@ -1052,7 +1053,7 @@ def rgibbs_p_rnd_cen(n_rnd_cen, n_states, prior_a=1., prior_b=1.):
 def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
                              prior_mean_log=2.65, prior_prec_log=1./0.652**2,
                              prior_shape=1., prior_rate=0.,
-                             brent_scale=6., fallback_upper=10000.,
+                             propDf=5., brent_scale=6., fallback_upper=10000.,
                              profile=False):
     '''
     Metropolis-Hastings steps for variance hyperparameters given all other
@@ -1075,7 +1076,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     # Compute posterior mode for shape and rate using profile log-posterior
     n = np.size(variances)
 
-    shape_hat, rate_hat = map_estimator_gamma(x=variances,
+    shape_hat, rate_hat = map_estimator_gamma(x=variances, log=True,
                                               prior_shape=prior_shape,
                                               prior_rate=prior_rate,
                                               prior_mean_log=prior_mean_log,
@@ -1135,7 +1136,9 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
 
         # Propose shape and rate parameter jointly
         theta_hat   = np.log(np.array([shape_hat, rate_hat]))
-        z_prop      = np.random.randn(2)
+        z_prop = (np.random.randn(2) / 
+                  np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=2) /
+                          propDf))
         theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
         shape_prop, rate_prop = np.exp(theta_prop)
 
@@ -1145,12 +1148,12 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
 
         # Compute log-ratio of proposal densities
 
-        # These are exponentiated bivariate normals with equivalent covariance
+        # These are transformed bivariate t's with equivalent covariance        
         # matrices, so the resulting Jacobian terms cancel. We are left to
         # contend with the z's and the Jacobian terms resulting from
         # exponentiation.
-        log_prop_ratio = np.sum(dnorm(z_prop, log=True) -
-                                dnorm(z_prev, log=True))
+        log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2/propDf)-
+                                                np.log(1. + z_prev**2 /propDf))
         log_prop_ratio += -np.sum(theta_prop - theta_prev)
 
     # Compute log-ratio of target densities.
@@ -1184,14 +1187,14 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
 def rmh_nbinom_hyperparams(x, r_prev, p_prev,
                            prior_mean_log=2.65, prior_prec_log=1./0.652**2,
                            prior_a=1., prior_b=1.,
-                           brent_scale=6., fallback_upper=10000.,
+                           propDf=5., brent_scale=6., fallback_upper=10000.,
                            profile=False):
     '''
     Metropolis-Hastings steps for negative-binomial hyperparameters given all
     other parameters.
 
     Using a log-normal prior for the r (convolution) hyperparameter and a
-    conditionall-conjugate beta prior for p.
+    conditionally-conjugate beta prior for p.
 
     Proposing from normal approximation to the conditional posterior
     (conditional independence chain). Parameters are log-transformed.
@@ -1206,7 +1209,8 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     # Compute posterior mode for r and p using profile log-posterior
     n = np.size(x)
 
-    r_hat, p_hat = map_estimator_nbinom(x=x, prior_a=prior_a, prior_b=prior_b,
+    r_hat, p_hat = map_estimator_nbinom(x=x, transform=True,
+                                        prior_a=prior_a, prior_b=prior_b,
                                         prior_mean_log=prior_mean_log,
                                         prior_prec_log=prior_prec_log,
                                         brent_scale=brent_scale,
@@ -1260,7 +1264,9 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
         # Propose r and p jointly
         theta_hat   = np.log(np.array([r_hat, p_hat]))
         theta_hat[1] -= np.log(1.-p_hat)
-        z_prop      = np.random.randn(2)
+        z_prop = (np.random.randn(2) / 
+                  np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=2) /
+                          propDf))
         theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
         r_prop, p_prop = np.exp(theta_prop)
         p_prop = p_prop / (1. + p_prop)
@@ -1272,12 +1278,12 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
 
         # Compute log-ratio of proposal densities
 
-        # These are transformed bivariate normals with equivalent covariance
+        # These are transformed bivariate t's with equivalent covariance
         # matrices, so the resulting Jacobian terms cancel. We are left to
         # contend with the z's and the Jacobian terms resulting from the
         # exponential and logit transformations.
-        log_prop_ratio = np.sum(dnorm(z_prop, log=True) -
-                                dnorm(z_prev, log=True))
+        log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2/propDf)-
+                                                np.log(1. + z_prev**2 /propDf))
         log_prop_ratio += -(np.log(r_prop) - np.log(r_prev))
         log_prop_ratio += -(np.log(p_prop) + np.log(1.-p_prop)
                             -np.log(p_prev) - np.log(1.-p_prev))
