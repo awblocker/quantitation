@@ -1,3 +1,8 @@
+# Section for paths to data
+data:
+    path_state_data: Null
+    path_mapping_peptide: Null
+
 # Section for prior parameters
 priors:
     # Random censoring probability
