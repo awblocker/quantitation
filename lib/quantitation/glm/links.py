@@ -77,19 +77,19 @@ class Logit(Link):
         '''
         Logit link function
         '''
-        return np.log(mu) - np.log(1.-mu)
+        return np.log(mu/(1.-mu))
     
     def inv(self, eta):
         '''
         Inverse of logit link function
         '''
-        return 1./(1. + np.exp(-eta))
+        return np.minimum(1./EPS, np.maximum(1./(1. + np.exp(-eta)), EPS))
     
     def deriv(self, eta):
         '''
         Derivative of logit link function with respect to eta.
         '''
-        return np.maximum(np.exp(-eta) / (1. + np.exp(-eta))**2, EPS)
+        return np.maximum(np.exp(-eta) / (1. + np.exp(-eta))**2, np.sqrt(EPS))
         
 class Probit(Link):
     '''
