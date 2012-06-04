@@ -504,7 +504,7 @@ def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
         # Propose from negative binomial distribution
         # This is almost correct, modulo the 0 vs. 1 minimum non-conjugacy
         prop    = np.random.negative_binomial(n_obs[active] + r, pgeom[active],
-                                              size=active.size)
+                                              size=np.sum(active))
 
         # Compute acceptance probability; bog standard
         u       = np.random.uniform(size=np.sum(active))
@@ -649,12 +649,16 @@ def map_estimator_gamma(x, prior_shape=1., prior_rate=0.,
         upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
     else:
         upper = fallback_upper
+    
+    # Verify that score is negative at upper bound
+    args=(x, False, prior_shape, prior_rate, prior_mean_log, prior_prec_log)
+    while score_profile_posterior_gamma(upper, *args) > 0:
+        upper *= 2.
 
     # Use Brent method to find root of score function
     shape_hat = optimize.brentq(f=score_profile_posterior_gamma,
                                 a=np.sqrt(EPS), b=upper,
-                                args=(x, False, prior_shape, prior_rate,
-                                      prior_mean_log, prior_prec_log))
+                                args=args)
 
     # Compute posterior mode of rate
     rate_hat = ((shape_hat + (prior_shape-1.)/n) /
@@ -682,6 +686,11 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1.,
         upper = np.exp(prior_mean_log + brent_scale/np.sqrt(prior_prec_log))
     else:
         upper = fallback_upper
+    
+    # Verify that score is negative at upper bound
+    args=(x, False, prior_a, prior_b, prior_mean_log, prior_prec_log)
+    while score_profile_posterior_nbinom(upper, *args) > 0:
+        upper *= 2.
 
     # Use Brent method to find root of score function
     r_hat = optimize.brentq(f=score_profile_posterior_nbinom,
@@ -726,9 +735,22 @@ def characterize_censored_intensity_dist(eta_0, eta_1, mu, sigmasq,
 
     # First, start with a bit of bisection to get in basin of attraction for
     # Halley's method
+    
+    lower = mu - bisectScale*np.sqrt(sigmasq)
+    upper = mu + bisectScale*np.sqrt(sigmasq)    
+    
+    # Make sure the starting points are of opposite signs
+    invalid = (np.sign(deriv_logdcensored(lower, **dargs)) *
+               np.sign(deriv_logdcensored(upper, **dargs)) > 0)
+    while np.any(invalid):
+        lower -= bisectScale*np.sqrt(sigmasq)
+        upper += bisectScale*np.sqrt(sigmasq)
+        invalid = (np.sign(deriv_logdcensored(lower, **dargs)) *
+                   np.sign(deriv_logdcensored(upper, **dargs)) > 0)
+    
+    # Run bisection
     y_hat = vectorized_bisection(f=deriv_logdcensored, f_kwargs=dargs,
-                                 lower=mu-bisectScale*np.sqrt(sigmasq),
-                                 upper=mu+bisectScale*np.sqrt(sigmasq),
+                                 lower=lower, upper=upper,
                                  tol=np.sqrt(tol), maxIter=bisectIter)
 
     # Second, run Halley's method to find the censored intensity distribution's
@@ -1007,8 +1029,8 @@ def rgibbs_variances(rss, n, prior_shape=1., prior_rate=0.):
     The dimensionality of the draw is determined by the size of rss.
     All other inputs must be compatible in size.
     '''
-    variances = 1. / np.random.gamma(shape=shape + n/2.,
-                                     scale=1./(rate + rss/2.),
+    variances = 1. / np.random.gamma(shape=prior_shape + n/2.,
+                                     scale=1./(prior_rate + rss/2.),
                                      size=np.size(rss))
     return variances
 
@@ -1047,7 +1069,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     (profile=False) or approximately marginalize over the rate parameter (by
     profiling) and propose the rate given shape exactly (profile=True).
 
-    Returns a 3-tuple consisting of the new shape, new rate, and a boolean
+    Returns a 2-tuple consisting of the new (shape, rate) and a boolean
     indicating acceptance.
     '''
     # Compute posterior mode for shape and rate using profile log-posterior
@@ -1178,7 +1200,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     (profile=False) or approximately marginalize over the p parameter (by
     profiling) and propose the p given r exactly (profile=True).
 
-    Returns a 3-tuple consisting of the new r, new p, and a boolean indicating
+    Returns a 2-tuple consisting of the new (r, p) and a boolean indicating
     acceptance.
     '''
     # Compute posterior mode for r and p using profile log-posterior

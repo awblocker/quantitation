@@ -63,13 +63,13 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     n_proteins = 1 + np.max(mapping_peptides)
 
     # Check for validity of mapping vectors
-    if (not issubclass(type(mapping_states_obs.dtype), np.integer) or
+    if (not issubclass(mapping_states_obs.dtype.type, np.integer) or
         np.min(mapping_states_obs) < 0 or
         np.max(mapping_states_obs) > n_peptides - 1):
         raise ValueError('State to peptide mapping (mapping_states_obs)'
                          ' is not valid')
 
-    if (not issubclass(type(mapping_peptides.dtype), np.integer) or
+    if (not issubclass(mapping_peptides.dtype.type, np.integer) or
         np.min(mapping_peptides) < 0 or
         np.max(mapping_peptides) > n_peptides - 1):
         raise ValueError('Peptide to protein mapping (mapping_peptides)'
@@ -124,19 +124,20 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     p_rnd_cen[0] = cfg['init']['p_rnd_cen']
 
     # eta from cfg; bivariate normal draw
-    with cfg['init']['eta'] as eta0:
-        eta_draws[0,0] = eta0['mean'][0] + eta0['sd'][0]*np.random.randn(1)
-        eta_draws[0,1] = (eta0['mean'][1] +
-                          eta0['cor']*eta0['sd'][1]/eta0['sd'][0]*
+    eta0 = cfg['init']['eta']
+    eta_draws[0,0] = eta0['mean'][0] + eta0['sd'][0]*np.random.randn(1)
+    eta_draws[0,1] = eta0['mean'][1]
+    if eta0['sd'][1] > 0:
+        eta_draws[0,1] += (eta0['cor']*eta0['sd'][1]/eta0['sd'][0]*
                           (eta_draws[0,0] - eta0['mean'][0]))
         eta_draws[0,1] += (np.sqrt(1.-eta0['cor']**2) * eta0['sd'][1] *
-                           np.random.randn(1))
+                           np.random.randn(1))        
 
     # Number of states parameters from MAP estimator based on number of observed
     # peptides; very crude, but not altogether terrible. Note that this ignores
     # the +1 location shift in the actual n_states distribution.
     r[0], lmbda[0] = lib.map_estimator_nbinom(x=n_obs_states_per_peptide,
-                                              **cfg['priors']['n_states_model'])
+                                              **cfg['priors']['n_states_dist'])
 
     # Hyperparameters for state- and peptide-level variance distributions
     # directly from cfg
@@ -147,11 +148,14 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                            
     # State- and peptide-level variances via inverse-gamma draws
     sigmasq_draws[0]    = 1./np.random.gamma(shape=shape_sigmasq[0], 
-                                             rate=rate_sigmasq[0],
+                                             scale=1./rate_sigmasq[0],
                                              size=n_proteins)
     tausq_draws[0]      = 1./np.random.gamma(shape=shape_tausq[0], 
-                                             rate=rate_tausq[0],
+                                             scale=1./rate_tausq[0],
                                              size=n_proteins)
+                                             
+    # Mapping from protein to peptide conditional variances for convenience
+    var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
     
     # Peptide- and protein-level means using mean observed intensity; excluding
     # missing states and imputing missing peptides as zero
@@ -178,8 +182,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         #   intensity posteriors.
         kwargs = {'eta_0' : eta_draws[t-1,0],
                   'eta_1' : eta_draws[t-1,1],
-                  'mu' : mu_draws[t-1],
-                  'sigmasq' : sigmasq_draws[t-1]}
+                  'mu' : gamma_draws[t-1],
+                  'sigmasq' : var_peptide_conditional}
         cen_dist = lib.characterize_censored_intensity_dist(**kwargs)
         
         # (1b) Draw number of censored states per peptide
@@ -196,6 +200,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         kwargs['n_cen'] = n_cen_states_per_peptide
         kwargs['p_rnd_cen'] = p_rnd_cen[t-1]
         kwargs['propDf'] = cfg['settings']['propDf']
+        kwargs.update(cen_dist)
         intensities_cen, mapping_states_cen, W = lib.rintensities_cen(**kwargs)
         
         
@@ -217,11 +222,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                        
                                        
         # (3) Update peptide-level mean parameters (gamma). Gibbs step.
-        gamma_draws[t] = lib.rgibbs_gamma(mu=mu_draws[t-1],
-                                          tausq=tausq_draws[t-1],
-                                          sigmasq=sigmasq_draws[t-1],
-                                          y_bar=mean_intensity_per_peptide,
-                                          n_states=n_states)
+        gamma_draws[t] = lib.rgibbs_gamma(mu=mu_draws[t-1][mapping_peptides],
+                                       tausq=tausq_draws[t-1][mapping_peptides],
+                                       sigmasq=var_peptide_conditional,
+                                       y_bar=mean_intensity_per_peptide,
+                                       n_states=n_states)
         mean_gamma_by_protein = np.bincount(mapping_peptides,
                                             weights=gamma_draws[t])
         mean_gamma_by_protein /= n_peptides_per_protein
@@ -241,6 +246,9 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                                 prior_shape=shape_sigmasq[t-1],
                                                 prior_rate=rate_sigmasq[t-1])
         
+        # Mapping from protein to peptide conditional variances for convenience
+        var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
+        
         
         # (6) Update peptide-level variance parameters (tausq). Gibbs step.
         rss = np.sum((gamma_draws[t] - mu_draws[t,mapping_peptides])**2)
@@ -255,7 +263,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                               shape_prev=shape_sigmasq[t-1],
                                               rate_prev=rate_sigmasq[t-1],
                                               **cfg['priors']['sigmasq_dist'])
-        shape_sigmasq[t], rate_sigmasq[t], accept = result
+        (shape_sigmasq[t], rate_sigmasq[t]), accept = result
         accept_stats['sigmasq_dist'] += accept
         
         
@@ -265,7 +273,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                               shape_prev=shape_tausq[t-1],
                                               rate_prev=rate_tausq[t-1],
                                               **cfg['priors']['tausq_dist'])
-        shape_tausq[t], rate_tausq[t], accept = result
+        (shape_tausq[t], rate_tausq[t]), accept = result
         accept_stats['tausq_dist'] += accept
         
         
@@ -274,7 +282,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         result = lib.rmh_nbinom_hyperparams(x=n_states_per_peptide,
                                             r_prev=r[t-1], p_prev=lmbda[t-1],
                                             **cfg['priors']['n_states_dist'])
-        r[t], lmbda[t], accept = result
+        (r[t], lmbda[t]), accept = result
         accept_stats['n_states_dist'] += accept
         
         
@@ -283,10 +291,10 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         # (10a) Build design matrix and response. Only using observed and
         # intensity-censored states.
-        n_at_risk = n_obs_states + np.sum(W)
+        n_at_risk = n_obs_states + np.sum(W<1)
         X = np.empty((n_at_risk, 2))
         X[:,0] = 1.
-        X[:,1] = np.r_[intensities_obs, intensities_cen[W>0]]
+        X[:,1] = np.r_[intensities_obs, intensities_cen[W<1]]
         #
         y = np.zeros(n_at_risk)
         y[:n_obs_states] = 1.
