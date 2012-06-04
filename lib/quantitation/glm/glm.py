@@ -99,7 +99,6 @@ def glm(y, X, family, w=1, offset=0, cov=False, info=False,
         - I, the estimated Fisher information matrix, if info
     '''
     # Get dimensions
-    n = X.shape[0]
     p = X.shape[1]
     
     # Initalize mu and eta
@@ -172,11 +171,12 @@ def glm(y, X, family, w=1, offset=0, cov=False, info=False,
     return result
     
 def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
-                       prior_log_density=None, prior_args=tuple(),
+                       propDf=5., prior_log_density=None, prior_args=tuple(),
                        prior_kwargs={}, **kwargs):
     '''
     Execute single Metropolis-Hastings step for GLM coefficients using normal
-    approximation to their posterior distribution.
+    approximation to their posterior distribution. Proposes linearly-transformed 
+    vector of independent t_propDf random variables.
     
     At least one of I (the Fisher information) and V (the inverse Fisher 
     information) must be provided. If I is provided, V is ignored. It is more
@@ -198,7 +198,6 @@ def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
         warnings.warn('Only Fisher information I will be used')
     
     # Get dimensions
-    n = X.shape[0]
     p = X.shape[1]
     
     # Compute Cholesky decomposition of information matrix
@@ -209,8 +208,10 @@ def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
         # Harder case; have inverse of information matrix
         L = linalg.cholesky(linalg.inv(V), lower=True)
     
-    # Propose from multivariate normal with appropriate mean and covariance
-    z_prop = np.random.randn(p)
+    # Propose from linearly-transformed t with appropriate mean and covariance
+    z_prop = (np.random.randn(p) / 
+              np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=p) /
+                      propDf))
     b_prop = b_hat + linalg.solve_triangular(L.T, z_prop, lower=False)
     
     # Demean and decorrelate previous draw of b
@@ -236,7 +237,8 @@ def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
     
     # Compute log-ratio of proposal densities. This is very easy with the
     # demeaned and decorrelated values z.
-    log_prop_ratio = -0.5*np.sum(z_prop**2 - z_prev**2)
+    log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2/propDf)-
+                                            np.log(1. + z_prev**2 /propDf))
     
     # Compute acceptance probability
     log_accept_prob = log_target_ratio - log_prop_ratio
