@@ -1,0 +1,52 @@
+# Section for prior parameters
+priors:
+    # Random censoring probability
+    p_rnd_cen:
+        prior_a: 1.
+        prior_b: 1.
+    # Hyperparameters for n_states model
+    n_states_dist:
+        prior_a: 1.
+        prior_b: 1.
+        prior_mean_log: 2.65
+        prior_prec_log: 2.35
+    # Hyperparameters for state-level variance distribution:
+    sigmasq_dist:
+        prior_shape: 1.
+        prior_rate: 0.
+        prior_mean_log: 2.65
+        prior_prec_log: 2.35
+    # Hyperparameters for peptide-level variance distribution
+    tausq_dist:
+        prior_shape: 1.
+        prior_rate: 0.
+        prior_mean_log: 2.65
+        prior_prec_log: 2.35
+    # Protein-level means
+    mu:
+        prior_mean: 0.
+        prior_prec: 0.
+
+# Section for initializations
+init:
+    # Probability of random censoring
+    p_rnd_cen: 0.1
+    # Coefficients for intensity-based censoring model
+    eta:
+        mean: [-4., 12.]
+        sd: [0., 0.]
+        cor: 0.
+    # Hyperparameters for state-level variance distribution:
+    sigmasq_dist:
+        shape: 4.
+        rate: 2.
+    # Hyperparameters for peptide-level variance distribution
+    tausq_dist:
+        shape: 4.
+        rate: 2.
+    
+# Section for algorithmic settings for MCMC
+settings:
+    n_iterations: 100
+    propDf: 3.
+
