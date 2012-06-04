@@ -204,6 +204,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         # Update state-level counts
         n_states_per_peptide = (n_obs_states_per_peptide +
                                 n_cen_states_per_peptide)
+        n_states_per_protein = np.bincount(mapping_peptides,
+                                           weights=n_states_per_peptide)
         n_states = np.sum(n_states_per_peptide)
         
         # (1c) Draw censored intensities
@@ -236,7 +238,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                        tausq=tausq_draws[t-1][mapping_peptides],
                                        sigmasq=var_peptide_conditional,
                                        y_bar=mean_intensity_per_peptide,
-                                       n_states=n_states)
+                                       n_states=n_states_per_peptide)
         mean_gamma_by_protein = np.bincount(mapping_peptides,
                                             weights=gamma_draws[t])
         mean_gamma_by_protein /= n_peptides_per_protein
@@ -245,24 +247,31 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         # (4) Update protein-level mean parameters (mu). Gibbs step.
         mu_draws[t] = lib.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
                                     tausq=tausq_draws[t-1],
-                                    n_peptides=n_peptides,
+                                    n_peptides=n_peptides_per_protein,
                                     **cfg['priors']['mu'])
         
         
         # (5) Update state-level variance parameters (sigmasq). Gibbs step.
-        rss = np.sum((intensities_obs - gamma_draws[t,mapping_states_obs])**2)
-        rss += np.sum((intensities_cen - gamma_draws[t,mapping_states_cen])**2)
-        sigmasq_draws[t] = lib.rgibbs_variances(rss=rss, n=n_states,
+        rss_by_state = (intensities_obs - gamma_draws[t,mapping_states_obs])**2
+        rss_by_protein = np.bincount(mapping_peptides[mapping_states_obs],
+                                     weights=rss_by_state)
+        rss_by_state = (intensities_cen - gamma_draws[t,mapping_states_cen])**2
+        rss_by_protein += np.bincount(mapping_peptides[mapping_states_cen],
+                                      weights=rss_by_state)
+        sigmasq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
+                                                n=n_states_per_protein,
                                                 prior_shape=shape_sigmasq[t-1],
                                                 prior_rate=rate_sigmasq[t-1])
         
         # Mapping from protein to peptide conditional variances for convenience
-        var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
+        var_peptide_conditional = sigmasq_draws[t][mapping_peptides]
         
         
         # (6) Update peptide-level variance parameters (tausq). Gibbs step.
-        rss = np.sum((gamma_draws[t] - mu_draws[t,mapping_peptides])**2)
-        tausq_draws[t] = lib.rgibbs_variances(rss=rss, n=n_peptides,
+        rss_by_peptide = (gamma_draws[t] - mu_draws[t,mapping_peptides])**2
+        rss_by_protein = np.bincount(mapping_peptides, weights=rss_by_peptide)
+        tausq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
+                                              n=n_peptides_per_protein,
                                               prior_shape=shape_tausq[t-1],
                                               prior_rate=rate_tausq[t-1])
         
@@ -327,5 +336,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     draws = {'mu' : mu_draws,
              'gamma' : gamma_draws,
              'eta' : eta_draws,
-             'p_rnd_cen' : p_rnd_cen}
+             'p_rnd_cen' : p_rnd_cen,
+             'lmbda' : lmbda,
+             'r' : r}
     return (draws, accept_stats)
