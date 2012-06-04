@@ -15,7 +15,7 @@ priors:
         prior_a: 1.
         prior_b: 1.
         prior_mean_log: 2.65
-        prior_prec_log: 2.35
+        prior_prec_log: 0.25
     # Hyperparameters for state-level variance distribution:
     sigmasq_dist:
         prior_shape: 1.
@@ -39,7 +39,7 @@ init:
     p_rnd_cen: 0.1
     # Coefficients for intensity-based censoring model
     eta:
-        mean: [-4., 12.]
+        mean: [-2.5, 0.5]
         sd: [0., 0.]
         cor: 0.
     # Hyperparameters for state-level variance distribution:
@@ -53,8 +53,8 @@ init:
     
 # Section for algorithmic settings for MCMC
 settings:
-    n_iterations: 100
+    n_iterations: 1000
     propDf: 3.
     verbose: 1
-    verbose_interval: 10
+    verbose_interval: 50
 
