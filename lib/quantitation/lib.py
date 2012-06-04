@@ -484,14 +484,14 @@ def rncen(n_obs, p_rnd_cen, p_int_cen, lmbda, r):
     Must have n_obs, p_rnd_cen, and p_int_cen as Numpy vectors of same length.
     r and lmbda must be scalars.
     '''
-    m = n_obs.size
+    m = np.size(n_obs)
 
     # Setup vectors for result and stopping indicators
     active  = np.ones(m, dtype=bool)
-    n_cen    = np.zeros(m, dtype=int)
+    n_cen   = np.zeros(m, dtype=int)
 
     # Compute probability for geometric component of density
-    pgeom   = 1-(1-lmbda)*(p_rnd_cen+(1-p_rnd_cen)*p_int_cen)
+    pgeom   = 1.-(1.-lmbda)*(p_rnd_cen+(1.-p_rnd_cen)*p_int_cen)
 
     # Compute necessary bound for envelope condition
     bound = np.ones(m)
