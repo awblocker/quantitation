@@ -63,13 +63,13 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     n_proteins = 1 + np.max(mapping_peptides)
 
     # Check for validity of mapping vectors
-    if (not issubclass(mapping_states_obs.dtype, np.integer) or
+    if (not issubclass(type(mapping_states_obs.dtype), np.integer) or
         np.min(mapping_states_obs) < 0 or
         np.max(mapping_states_obs) > n_peptides - 1):
         raise ValueError('State to peptide mapping (mapping_states_obs)'
                          ' is not valid')
 
-    if (not issubclass(mapping_peptides.dtype, np.integer) or
+    if (not issubclass(type(mapping_peptides.dtype), np.integer) or
         np.min(mapping_peptides) < 0 or
         np.max(mapping_peptides) > n_peptides - 1):
         raise ValueError('Peptide to protein mapping (mapping_peptides)'
