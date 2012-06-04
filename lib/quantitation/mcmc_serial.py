@@ -100,6 +100,9 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     # Peptide- and protein-level means
     gamma_draws     = np.empty((n_iterations, n_peptides))
     mu_draws        = np.empty((n_iterations, n_proteins))
+    
+    # Number of censored states per peptide
+    n_cen_states_per_peptide_draws = np.zeros((n_iterations, n_peptides))
 
     # State- and peptide-level variances
     sigmasq_draws   = np.empty((n_iterations, n_proteins))
@@ -201,6 +204,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                              p_rnd_cen=p_rnd_cen[t-1],
                                              p_int_cen=cen_dist['p_int_cen'],
                                              lmbda=lmbda[t-1], r=r[t-1])
+        n_cen_states_per_peptide_draws[t] = n_cen_states_per_peptide
         # Update state-level counts
         n_states_per_peptide = (n_obs_states_per_peptide +
                                 n_cen_states_per_peptide)
@@ -298,7 +302,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         # (9) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
-        result = lib.rmh_nbinom_hyperparams(x=n_states_per_peptide,
+        result = lib.rmh_nbinom_hyperparams(x=n_states_per_peptide-1,
                                             r_prev=r[t-1], p_prev=lmbda[t-1],
                                             **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
@@ -340,5 +344,6 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
              'lmbda' : lmbda,
              'r' : r,
              'sigmasq' : sigmasq_draws,
-             'tausq' : tausq_draws}
+             'tausq' : tausq_draws,
+             'n_cen_states_per_peptide' : n_cen_states_per_peptide_draws}
     return (draws, accept_stats)
