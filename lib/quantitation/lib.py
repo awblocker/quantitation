@@ -987,7 +987,7 @@ def rgibbs_mu(gamma_bar, tausq, n_peptides, prior_mean=0., prior_prec=0.):
                           size=gamma_bar.size)
     return mu
 
-def rgibbs_variances(rss, n, shape=1., rate=0.):
+def rgibbs_variances(rss, n, prior_shape=1., prior_rate=0.):
     '''
     Gibbs update for variances given all other parameters.
     Used for sigmasq (state-level variances) and tausq (peptide-level
