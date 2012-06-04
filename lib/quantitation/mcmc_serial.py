@@ -51,7 +51,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     if type(mapping_peptides) is not np.ndarray:
         mapping_peptides = np.asanyarray(mapping_peptides, dtype=np.int)
 
-    # Extract dimensionalities from input
+    # Extract dimensions from input
 
     # Number of iterations from cfg
     n_iterations = cfg['settings']['n_iterations']
@@ -74,7 +74,10 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                          ' is not valid')
 
     # Compute tabulations that are invariant across iterations
-
+    
+    # Total number of observed states
+    n_obs_states = np.size(intensities_obs)
+    
     # Tabulate peptides per protein
     n_peptides_per_protein = np.bincount(mapping_peptides)
 
@@ -154,6 +157,15 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                        np.maximum(1, n_obs_states_per_peptide))
     mu_draws[0]     = (np.bincount(mapping_peptides, gamma_draws[0]) /
                        n_peptides_per_protein)
+                       
+    # Instantiate GLM family for eta step
+    logit_family = glm.families.Binomial(link=glm.links.Logit)
+    
+    # Initialize dictionary for acceptance statistics
+    accept_stats = {'sigmasq_dist' : 0,
+                    'tausq_dist' : 0,
+                    'n_states_dist' : 0,
+                    'eta' : 0}
     
     # Master loop for MCMC iterations
     for t in xrange(1, n_iterations):
@@ -237,23 +249,59 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         # (7) Update state-level variance hyperparameters (sigmasq
         #   distribution). Conditional independence-chain MH step.
+        result = lib.rmh_variance_hyperparams(variances=sigmasq_draws[t],
+                                              shape_prev=shape_sigmasq[t-1],
+                                              rate_prev=rate_sigmasq[t-1],
+                                              **cfg['priors']['sigmasq_dist'])
+        shape_sigmasq[t], rate_sigmasq[t], accept = result
+        accept_stats['sigmasq_dist'] += accept
         
         
         # (8) Update peptide-level variance hyperparameterse (tausq
         #   distribution). Conditional independence-chain MH step.
+        result = lib.rmh_variance_hyperparams(variances=tausq_draws[t],
+                                              shape_prev=shape_tausq[t-1],
+                                              rate_prev=rate_tausq[t-1],
+                                              **cfg['priors']['tausq_dist'])
+        shape_tausq[t], rate_tausq[t], accept = result
+        accept_stats['tausq_dist'] += accept
         
         
         # (9) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
+        result = lib.rmh_nbinom_hyperparams(x=n_states_per_peptide,
+                                            r_prev=r[t-1], p_prev=lmbda[t-1],
+                                            **cfg['priors']['n_states_dist'])
+        r[t], lmbda[t], accept = result
+        accept_stats['n_states_dist'] += accept
         
         
         # (10) Update coefficients of intensity-based probabilistic censoring
         #   model (eta). Conditional independence-chain MH step.
-                
+        
+        # (10a) Build design matrix and response. Only using observed and
+        # intensity-censored states.
+        n_at_risk = n_obs_states + np.sum(W)
+        X = np.empty((n_at_risk, 2))
+        X[:,0] = 1.
+        X[:,1] = np.r_[intensities_obs, intensities_cen[W>0]]
+        #
+        y = np.zeros(n_at_risk)
+        y[:n_obs_states] = 1.
+        
+        # (10b) Estimate GLM parameters.
+        fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True)
+        
+        # (10c) Execute MH step.
+        eta_draws[t], accept = glm.mh_update_glm_coef(b_prev=eta_draws[t-1],
+                                                      y=y, X=X,
+                                                      family=logit_family,
+                                                      **fit_eta)
+        accept_stats['eta'] += accept
         
     # Build dictionary of draws to return
     draws = {'mu' : mu_draws,
              'gamma' : gamma_draws,
              'eta' : eta_draws,
              'p_rnd_cen' : p_rnd_cen}
-    return draws
+    return (draws, accept_stats)
