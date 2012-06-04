@@ -33,9 +33,9 @@ class Link:
         '''
         return NotImplementedError
     
-    def deriv(self, mu):
+    def deriv(self, eta):
         '''
-        Evaluates derivative of link function with respect to mean mu.
+        Evaluates derivative of mean mu with respect to linear predictor eta.
         Vectorized.
         
         Placeholder
@@ -62,16 +62,17 @@ class Log(Link):
         '''
         return np.exp(eta)
     
-    def deriv(self, mu):
+    def deriv(self, eta):
         '''
-        Derivative of log link function with respect to mu.
+        Derivative of log link function with respect to eta.
         '''
-        return 1./mu
+        return np.exp(eta)
 
 class Logit(Link):
     '''
     Logit link.
     '''
+
     def __call__(self, mu):
         '''
         Logit link function
@@ -84,12 +85,12 @@ class Logit(Link):
         '''
         return 1./(1. + np.exp(-eta))
     
-    def deriv(self, mu):
+    def deriv(self, eta):
         '''
-        Derivative of logit link function with respect to mu.
+        Derivative of logit link function with respect to eta.
         '''
-        return 1./mu/(1.-mu)
-
+        return np.maximum(np.exp(-eta) / (1. + np.exp(-eta))**2, EPS)
+        
 class Probit(Link):
     '''
     Probit link.
@@ -109,11 +110,11 @@ class Probit(Link):
         '''
         return stats.norm.cdf(eta)
     
-    def deriv(self, mu):
+    def deriv(self, eta):
         '''
-        Derivative of probit link function with respect to mu.
+        Derivative of normal CDF inverse link function with respect to eta.
         '''
-        return 1./np.maximum(stats.norm.pdf(stats.norm.ppf(mu)), EPS)
+        return np.maximum(stats.norm.pdf(eta), EPS)
 
 class Cloglog(Link):
     '''
@@ -131,9 +132,10 @@ class Cloglog(Link):
         '''
         return 1 - np.exp(-np.exp(eta))
     
-    def deriv(self, mu):
+    def deriv(self, eta):
         '''
-        Derivative of cloglog link function with respect to mu.
+        Derivative of cloglog inverse link function with respect to eta.
         '''
-        return -1./np.log(1.-mu)/(1.-mu)
+        eta = np.minimum(eta, 700)
+        return np.maximum(np.exp(eta)*np.exp(-np.exp(eta)), EPS)
 

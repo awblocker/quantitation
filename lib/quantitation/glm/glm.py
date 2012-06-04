@@ -120,7 +120,7 @@ def glm(y, X, family, w=1, offset=0, cov=False, info=False,
         weights_ls = w*family.weights(mu)
         
         # Compute surrogate dependent variable for WLS
-        z = eta + (y-mu)*family.link.deriv(mu) - offset
+        z = eta + (y-mu)/family.link.deriv(eta) - offset
         
         # Run WLS with desired method
         fit = wls(X=X, y=z, w=weights_ls, method=ls_method)

@@ -64,7 +64,7 @@ class Family:
         
         Takes fitted mean as input.
         '''
-        return 1 / self.link.deriv(mu)**2 / self.var(mu)
+        return self.link.deriv(self.link(mu))**2 / self.var(mu)
     
     def loglik(self, y, mu, w=1.):
         '''
