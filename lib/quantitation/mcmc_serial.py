@@ -338,5 +338,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
              'eta' : eta_draws,
              'p_rnd_cen' : p_rnd_cen,
              'lmbda' : lmbda,
-             'r' : r}
+             'r' : r,
+             'sigmasq' : sigmasq_draws,
+             'tausq' : tausq_draws}
     return (draws, accept_stats)
