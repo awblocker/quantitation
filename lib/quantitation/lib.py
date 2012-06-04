@@ -131,7 +131,7 @@ def dgamma(x, shape=1., rate=1., log=False):
         return ld
     return np.exp(ld)
 
-def lp_profile_gamma(shape, x, prior_shape=1., prior_rate=0.,
+def lp_profile_gamma(shape, x, log=False, prior_shape=1., prior_rate=0.,
                      prior_mean_log=0., prior_prec_log=0.):
     '''
     Compute profile log-posterior of shape parameter for gamma likelihood.
@@ -140,13 +140,15 @@ def lp_profile_gamma(shape, x, prior_shape=1., prior_rate=0.,
 
     Also using log-normal prior on shape parameter itself with given log-mean
     and precision.
+    
+    If log, compute log-posterior for log(shape) and log(rate)
 
     Returns a float with the profile log-posterior.
     '''
     n = np.size(x)
 
     # Compute conditional posterior mode of rate parameter
-    rate_hat = (shape + (prior_shape-1.)/n)/(np.mean(x) + prior_rate/n)
+    rate_hat = (shape + (prior_shape-1.+log)/n)/(np.mean(x) + prior_rate/n)
 
     # Evaluate log-posterior at conditional mode
     lp = np.sum(dgamma(x, shape=shape, rate=rate_hat, log=True))
@@ -155,6 +157,10 @@ def lp_profile_gamma(shape, x, prior_shape=1., prior_rate=0.,
     # Add prior for shape parameter
     lp += dlnorm(shape, mu=prior_mean_log,
                  sigmasq=1./np.float64(prior_prec_log), log=True)
+    
+    if log:
+        # Add Jacobians
+        lp += 1./shape + 1./rate_hat
 
     return lp
 
@@ -229,7 +235,8 @@ def score_profile_posterior_gamma(shape, x, log=False,
     '''
     # Compute conditional posterior mode of rate parameter
     n = np.size(x)
-    rate_hat = (shape + (prior_shape-1.)/n)/(np.mean(x) + prior_rate/n)
+    rate_hat = ((shape + (prior_shape-1.+log)/n) /
+                (np.mean(x) + prior_rate/n))
 
     # Compute score for untransformed shape parameter
     score = (np.sum(np.log(x)) - n*special.polygamma(0, shape) +
@@ -238,6 +245,9 @@ def score_profile_posterior_gamma(shape, x, log=False,
 
     # Handle log transformation of parameters via simple chain rule
     if log:
+        # Add Jacobian term
+        score += 1./shape
+        
         # Compute derivative of untransformed parameters wrt transformed ones
         deriv   = shape
 
@@ -268,7 +278,7 @@ def info_posterior_gamma(shape, rate, x, log=False,
     info = np.zeros((2,2))
 
     # shape, shape
-    info[0,0] = (n*special.polygamma(1, shape) +
+    info[0,0] = (n*special.polygamma(1, shape) -
                  1/shape**2*(1+prior_prec_log*(np.log(shape)-prior_mean_log-1)))
     # rate, rate
     info[1,1] = (n*shape+prior_shape-1.)/rate**2
@@ -277,12 +287,17 @@ def info_posterior_gamma(shape, rate, x, log=False,
 
     # Handle log transformation of parameters via simple chain rule
     if log:
+        # Add Jacobian terms
+        info[0,0] += 1./shape**2
+        info[1,1] += 1./rate**2
+        
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = np.array([-n*np.log(rate) + n*special.polygamma(0, shape) -
                          np.sum(np.log(x)) +
                          prior_prec_log*(np.log(shape)-prior_mean_log)/shape +
-                         1./shape,
-                         -(n*shape+prior_shape-1.)/rate+np.sum(x)+prior_rate])
+                         1./shape - log*1./shape,
+                         -(n*shape+prior_shape-1.)/rate+np.sum(x)+prior_rate
+                         - log*1./rate])
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv   = np.array([shape, rate])
@@ -314,18 +329,20 @@ def info_profile_posterior_gamma(shape, x, log=False,
     n = np.size(x)
 
     # Compute information for untransformed shape parameter
-    info = (n*special.polygamma(1, shape) - n/(shape + (prior_shape-1.)/n) +
+    info = (n*special.polygamma(1, shape) - n/(shape + (prior_shape-1.)/n) -
             1/shape**2*(1+prior_prec_log*(np.log(shape)-prior_mean_log-1)))
 
     # Handle log transformation of parameters via simple chain rule
     if log:
         # Compute conditional posterior mode of rate parameter
-        rate_hat = (shape + (prior_shape-1.)/n)/(np.mean(x) + prior_rate/n)
+        rate_hat = ((shape + (prior_shape-1.+log)/n) /
+                    (np.mean(x) + prior_rate/n))
 
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = (-np.sum(np.log(x)) + n*special.polygamma(0, shape) -
                 n*np.log(rate_hat) +
-                prior_prec_log*(np.log(shape)-prior_mean_log)/shape + 1./shape)
+                prior_prec_log*(np.log(shape)-prior_mean_log)/shape + 1./shape -
+                log*1./shape)
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv   = shape
@@ -337,13 +354,14 @@ def info_profile_posterior_gamma(shape, x, log=False,
 
     return info
 
-def score_profile_posterior_nbinom(r, x, log=False, prior_a=1., prior_b=1.,
+def score_profile_posterior_nbinom(r, x, transform=False, 
+                                   prior_a=1., prior_b=1.,
                                    prior_mean_log=0., prior_prec_log=0.):
     '''
     Profile posterior score for r (convolution) parameter of negative-binomial
     distribution.
 
-    If log, compute score for log(r) instead.
+    If transform, compute profile score for log(r) and logit(p) instead.
 
     Assumes a conditionally conjugate beta prior on p and an independent
     log-normal prior on r, each with the given parameters.
@@ -352,8 +370,8 @@ def score_profile_posterior_nbinom(r, x, log=False, prior_a=1., prior_b=1.,
     '''
     # Compute conditional posterior mode of p
     n = np.size(x)
-    A = np.mean(x) + (prior_a- 1.)/n
-    B = r + (prior_b - 1.)/n
+    A = np.mean(x) + (prior_a- 1.+transform)/n
+    B = r + (prior_b - 1.+transform)/n
     p_hat = A / (A + B)
 
     # Compute score for r
@@ -362,7 +380,10 @@ def score_profile_posterior_nbinom(r, x, log=False, prior_a=1., prior_b=1.,
     score += -prior_prec_log*(np.log(r) - prior_mean_log)/r - 1./r
 
     # Handle log transformation of parameters via simple chain rule
-    if log:
+    if transform:
+        # Add Jacobian term
+        score += 1./r        
+        
         # Compute derivative of untransformed parameters wrt transformed ones
         deriv   = r
 
@@ -393,7 +414,7 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
 
     # r, r
     info[0,0] = (n*special.polygamma(1, r) - np.sum(special.polygamma(1,x+r))
-                 + 1/r**2*(1+prior_prec_log*(np.log(r)-prior_mean_log-1)))
+                 - 1/r**2*(1+prior_prec_log*(np.log(r)-prior_mean_log-1)))
     # p, p
     info[1,1] = (n*r + prior_b - 1.)/(1.-p)**2 + (np.sum(x) + prior_a - 1.)/p**2
     # r, p and p, r
@@ -401,12 +422,17 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
 
     # Handle log transformation of parameters via simple chain rule
     if transform:
+        # Add Jacobian terms
+        info[0,0] += 1./r**2
+        info[1,1] += (1.-2.*p) / p**2 / (1.-p)**2
+        
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = np.array([-n*np.log(1.-p) - np.sum(special.polygamma(0, x+r))
                          + n*special.polygamma(0,r)
-                         + prior_prec_log*(np.log(r)-prior_mean_log)/r + 1./r,
+                         + prior_prec_log*(np.log(r)-prior_mean_log)/r + 1./r -
+                         transform*1./r,
                          -(np.sum(x) + prior_a - 1.)/p +
-                         (n*r + prior_b - 1.)/(1.-p)])
+                         (n*r + prior_b - 1.)/(1.-p) - transform*1./p/(1.-p)])
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv   = np.array([r, p*(1.-p)])
@@ -419,14 +445,14 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
 
     return info
 
-def info_profile_posterior_nbinom(r, x, log=False,
+def info_profile_posterior_nbinom(r, x, transform=False,
                                   prior_a=1., prior_b=1.,
                                   prior_mean_log=0., prior_prec_log=0.):
     '''
     Compute profile posterior information for r (convolution) parameter of
     negative-binomial distribution.
 
-    If log, compute information for log(r) instead.
+    If transform, compute profile information for log(r) and logit(p) instead.
     This is typically more useful, as the normal approximation holds much better
     on the transformed scale.
 
@@ -437,20 +463,23 @@ def info_profile_posterior_nbinom(r, x, log=False,
     '''
     # Compute information for untransformed r
     n = np.size(x)
-    A = np.mean(x) + (prior_a- 1.)/n
-    B = r + (prior_b - 1.)/n
+    A = np.mean(x) + (prior_a- 1.+transform)/n
+    B = r + (prior_b - 1.+transform)/n
     p_hat = A / (A + B)
 
     info = (n*special.polygamma(1, r) - np.sum(special.polygamma(1,x+r))
             - n * p_hat / B
-            + 1/r**2*(1+prior_prec_log*(np.log(r)-prior_mean_log-1)))
+            - 1/r**2*(1+prior_prec_log*(np.log(r)-prior_mean_log-1)))
 
     # Handle log transformation of parameters via simple chain rule
-    if log:
+    if transform:
+        # Add Jacobian terms
+        info += 1./r**2
+        
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = (-n*np.log(1.-p_hat) - np.sum(special.polygamma(0, x+r))
                 + n*special.polygamma(0,r))
-        grad += prior_prec_log*(np.log(r) - prior_mean_log)/r + 1./r
+        grad += prior_prec_log*(np.log(r) - prior_mean_log)/r + 2./r
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv   = r
@@ -629,7 +658,7 @@ def laplace_approx(f, xhat, info, f_args=tuple(), f_kwargs={}):
 # Functions for commonly-used MAP estimates
 #==============================================================================
 
-def map_estimator_gamma(x, prior_shape=1., prior_rate=0., log=False,
+def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
                         prior_mean_log=0., prior_prec_log=0.,
                         brent_scale=6., fallback_upper=10000.):
     '''
@@ -1077,8 +1106,9 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
     '''
     # Compute posterior mode for shape and rate using profile log-posterior
     n = np.size(variances)
+    precisions = 1./variances
 
-    shape_hat, rate_hat = map_estimator_gamma(x=variances, log=True,
+    shape_hat, rate_hat = map_estimator_gamma(x=precisions, log=True,
                                               prior_shape=prior_shape,
                                               prior_rate=prior_rate,
                                               prior_mean_log=prior_mean_log,
@@ -1091,7 +1121,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
 
         # Compute posterior information matrix for parameters
         info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
-                                    x=variances, log=True,
+                                    x=precisions, log=True,
                                     prior_shape=prior_shape,
                                     prior_rate=prior_rate,
                                     prior_mean_log=prior_mean_log,
@@ -1127,7 +1157,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
             # contend with the z's and the Jacobian terms resulting from
             # exponentiation.
             log_prop_ratio = -np.sum(np.log(1. + z_prop**2/propDf)-
-                                     np.log(1. + z_prev**2 /propDf))
+                                     np.log(1. + z_prev**2/propDf))
             log_prop_ratio *= (propDf+1.)/2.
             log_prop_ratio += -np.sum(theta_prop - theta_prev)
             
@@ -1137,7 +1167,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
 
         # Compute proposal variance
         var_prop = 1./info_profile_posterior_gamma(shape=shape_hat,
-                                           x=variances, log=True,
+                                           x=precisions, log=True,
                                            prior_shape=prior_shape,
                                            prior_rate=prior_rate,
                                            prior_mean_log=prior_mean_log,
@@ -1152,7 +1182,7 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
         # Propose rate parameter given shape from exact gamma conditional
         # posterior
         rate_prop = np.random.gamma(shape=n*shape_prop + prior_shape,
-                                    scale=1./(np.sum(variances) + prior_rate))
+                                    scale=1./(np.sum(precisions)+prior_rate))
 
         # Compute log-ratio of proposal densities
 
@@ -1163,26 +1193,26 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
                              scale=np.sqrt(var_prop), log=True))
         # Then, add conditional gamma proposal for rate
         log_prop_ratio += (dgamma(rate_prop, shape=n*shape_prop + prior_shape,
-                                  rate=np.sum(variances) + prior_rate,
+                                  rate=np.sum(precisions) + prior_rate,
                                   log=True) -
                            dgamma(rate_prev, shape=n*shape_prop + prior_shape,
-                                  rate=np.sum(variances) + prior_rate,
+                                  rate=np.sum(precisions) + prior_rate,
                                   log=True))
     
     # Compute log-ratio of target densities.
     # This is equivalent for both proposals.
 
-    # For target, start with the likelihood for the variances
-    log_target_ratio = np.sum(dgamma(variances, shape=shape_prop,
+    # For target, start with the likelihood for the precisions
+    log_target_ratio = np.sum(dgamma(precisions, shape=shape_prop,
                                      rate=rate_prop, log=True) -
-                              dgamma(variances, shape=shape_prev,
+                              dgamma(precisions, shape=shape_prev,
                                      rate=rate_prev, log=True))
     if prior_prec_log > 0:
         # Add the log-normal prior on the shape parameter
         log_target_ratio += (dlnorm(shape_prop, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log) -
+                                    sigmasq=1./prior_prec_log, log=True) -
                              dlnorm(shape_prev, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log))
+                                    sigmasq=1./prior_prec_log, log=True))
     # Add the gamma prior on the rate parameter
     if prior_rate > 0:
         log_target_ratio += (dgamma(rate_prop, shape=prior_shape,
@@ -1283,7 +1313,8 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
         # posterior for p.
 
         # Compute proposal variance
-        var_prop = 1./info_profile_posterior_nbinom(r=r_hat, x=x, log=True,
+        var_prop = 1./info_profile_posterior_nbinom(r=r_hat, x=x,
+                                           transform=True,
                                            prior_a=prior_a, prior_b=prior_b,
                                            prior_mean_log=prior_mean_log,
                                            prior_prec_log=prior_prec_log)
@@ -1322,9 +1353,9 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     if prior_prec_log > 0:
         # Add the log-normal prior on r
         log_target_ratio += (dlnorm(r_prop, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log) -
+                                    sigmasq=1./prior_prec_log, log=True) -
                              dlnorm(r_prev, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log))
+                                    sigmasq=1./prior_prec_log, log=True))
     # Add the beta prior on p
     log_target_ratio += (dbeta(p_prop, a=prior_a, b=prior_b, log=True) -
                          dbeta(p_prev, a=prior_a, b=prior_b, log=True))
