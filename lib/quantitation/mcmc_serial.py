@@ -159,7 +159,32 @@ def mcmc_serial(intensities_obs, mapping_states, mapping_peptides, cfg):
     
     # Master loop for MCMC iterations
     for t in xrange(1, n_iterations):
-        break
+        # (1) Draw missing data (n_cen and censored state intensities) given all
+        #   other parameters.
+
+        # (1a) Obtain p_int_cen per peptide and approximatations of censored
+        #   intensity posteriors.
+        kwargs = {'eta_0' : eta_draws[t-1,0],
+                  'eta_1' : eta_draws[t-1,1],
+                  'mu' : mu_draws[t-1],
+                  'sigmasq' : sigmasq_draws[t-1]}
+        cen_dist = lib.characterize_censored_intensity_dist(**kwargs)
+        
+        # (1b) Draw number of censored states per peptide
+        n_cen_states_per_peptide = lib.rncen(n_obs=n_obs_states_per_peptide,
+                                             p_rnd_cen=p_rnd_cen[t-1],
+                                             p_int_cen=cen_dist['p_int_cen'],
+                                             lmbda=lmbda[t-1], r=r[t-1])
+        # Update state-level counts
+        n_cen_states_per_protein = np.bincount(mapping_peptides,
+                                               weights=n_cen_states_per_peptide)
+        n_states_per_peptide = (n_obs_states_per_peptide +
+                                n_cen_states_per_peptide)
+        n_states_per_protein = (n_obs_states_per_protein +
+                                n_cen_states_per_protein)
+        
+        # (1c) Draw censored intensities
+        intensities_cen
     
     # Build dictionary of draws to return
     draws = {'mu' : mu_draws,

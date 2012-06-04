@@ -837,10 +837,10 @@ def bound_density_ratio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
     # Return results
     return M
 
-def r_intensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
-                      p_int_cen, p_rnd_cen,
-                      eta_0, eta_1, propDf,
-                      tol=1e-10, maxIter=100):
+def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
+                     p_int_cen, p_rnd_cen,
+                     eta_0, eta_1, propDf,
+                     tol=1e-10, maxIter=100):
     '''
     Draw censored intensities and random censoring indicators given nCen and
     quantities computed from Laplace approximation
