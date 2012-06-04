@@ -1,7 +1,8 @@
 # Section for paths to data
 data:
-    path_state_data: Null
-    path_mapping_peptides: Null
+    path_state_data: data/data_state_ups2_3h_1.txt
+    path_mapping_peptides: data/mapping_peptides_ups2_3h_1.txt
+    sep_input: " "
 
 # Section for prior parameters
 priors:
