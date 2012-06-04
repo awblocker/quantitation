@@ -211,7 +211,7 @@ def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
     
     # Propose from multivariate normal with appropriate mean and covariance
     z_prop = np.random.randn(p)
-    b_prop = b_hat + linalg.solve_triangular(L, z_prop, lower=True)
+    b_prop = b_hat + linalg.solve_triangular(L.T, z_prop, lower=False)
     
     # Demean and decorrelate previous draw of b
     z_prev = np.dot(L.T, b_prev - b_hat)
