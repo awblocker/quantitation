@@ -1,7 +1,7 @@
 # Section for paths to data
 data:
     path_state_data: Null
-    path_mapping_peptide: Null
+    path_mapping_peptides: Null
 
 # Section for prior parameters
 priors:
