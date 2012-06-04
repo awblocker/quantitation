@@ -248,3 +248,4 @@ def mh_update_glm_coef(b_prev, b_hat, y, X, family, w=1, I=None, V=None,
         return (b_prop, True)
     else:
         return (b_prev, False)
+        
