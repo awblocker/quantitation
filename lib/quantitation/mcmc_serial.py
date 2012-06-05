@@ -259,10 +259,12 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         # (5) Update state-level variance parameters (sigmasq). Gibbs step.
         rss_by_state = (intensities_obs - gamma_draws[t,mapping_states_obs])**2
         rss_by_protein = np.bincount(mapping_peptides[mapping_states_obs],
-                                     weights=rss_by_state)
+                                     weights=rss_by_state,
+                                     minlength=n_proteins)
         rss_by_state = (intensities_cen - gamma_draws[t,mapping_states_cen])**2
         rss_by_protein += np.bincount(mapping_peptides[mapping_states_cen],
-                                      weights=rss_by_state)
+                                      weights=rss_by_state,
+                                      minlength=n_proteins)
         sigmasq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
                                                 n=n_states_per_protein,
                                                 prior_shape=shape_sigmasq[t-1],
