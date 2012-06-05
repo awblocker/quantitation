@@ -1,7 +1,7 @@
 # Section for paths to data
 data:
-    path_data_state: data/data_state_ups2_3h_1.txt
-    path_mapping_peptides: data/mapping_peptides_ups2_3h_1.txt
+    path_data_state: data/data_state_sim.txt
+    path_mapping_peptides: data/mapping_peptides_sim.txt
     sep_input: " "
 
 # Section for prior parameters
@@ -15,17 +15,17 @@ priors:
         prior_a: 1.
         prior_b: 1.
         prior_mean_log: 2.65
-        prior_prec_log: 0.25
+        prior_prec_log: 1.
     # Hyperparameters for state-level variance distribution:
     sigmasq_dist:
         prior_shape: 1.
-        prior_rate: 0.
+        prior_rate: 1.
         prior_mean_log: 2.65
         prior_prec_log: 2.35
     # Hyperparameters for peptide-level variance distribution
     tausq_dist:
         prior_shape: 1.
-        prior_rate: 0.
+        prior_rate: 1.
         prior_mean_log: 2.65
         prior_prec_log: 2.35
     # Protein-level means
