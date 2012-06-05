@@ -53,8 +53,8 @@ init:
     
 # Section for algorithmic settings for MCMC
 settings:
-    n_iterations: 1000
+    n_iterations: 10000
     propDf: 3.
     verbose: 1
-    verbose_interval: 50
+    verbose_interval: 500
 
