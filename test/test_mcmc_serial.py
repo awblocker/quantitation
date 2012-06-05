@@ -1,4 +1,7 @@
 import time
+import bz2
+import contextlib
+import cPickle
 
 import numpy as np
 import yaml
@@ -7,6 +10,27 @@ import quantitation
 
 # Set parameters
 path_cfg = 'examples/basic.yml'
+save = False
+path_draws = 'test/draws_mcmc_serial.pickle.bz2'
+path_means = 'test/means_mcmc_serial.pickle.bz2'
+path_ses = 'test/ses_mcmc_serial.pickle.bz2'
+path_ess = 'test/ess_mcmc_serial.pickle.bz2'
+
+# Define functions
+def effective_sample_size(draws):
+    # Compute effective sample size using crude AR(1) approximation
+    if len(np.shape(draws)) < 2:
+        draws = draws[:,np.newaxis]
+    
+    # Demean the draws
+    draws = draws - draws.mean(axis=0)
+    
+    # Compute autocorrelation by column
+    acf = np.mean(draws[1:]*draws[:-1], axis=0) / np.var(draws, axis=0)
+
+    # Compute ess from ACF
+    ess = np.shape(draws)[0]*(1.-acf)/(1.+acf)
+    return ess
 
 # Load config
 cfg = yaml.load(open(path_cfg, 'rb'))
@@ -36,5 +60,34 @@ print "%f seconds per iteration" % ((time_done-time_start) /
 # Extract posterior means
 means = {}
 for k, x in draws.iteritems():
-    means[k] = np.mean(x, 0)
+    means[k] = np.mean(x, axis=0)
+
+# Extract estimates of effective sample size
+ess = {}
+for k, x in draws.iteritems():
+    ess[k] = effective_sample_size(x)
+
+# Extract estimates of posterior SDs
+ses = {}
+for k, x in draws.iteritems():
+    ses[k] = np.std(x, axis=0)
+
+if save:
+    # Pickle draws and posterior summaries to compressed files
+
+    # Draws first
+    with contextlib.closing(bz2.BZ2File(path_draws, mode='wb')) as f:
+        cPickle.dump(draws, file=f)
+
+    # Means
+    with contextlib.closing(bz2.BZ2File(path_means, mode='wb')) as f:
+        cPickle.dump(means, file=f)
+
+    # Standard errors
+    with contextlib.closing(bz2.BZ2File(path_ses, mode='wb')) as f:
+        cPickle.dump(ses, file=f)
+
+    # Effective sample sizes
+    with contextlib.closing(bz2.BZ2File(path_ess, mode='wb')) as f:
+        cPickle.dump(ess, file=f)
 
