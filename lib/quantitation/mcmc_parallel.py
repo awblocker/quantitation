@@ -395,7 +395,7 @@ def master(comm, n_proc, data, cfg):
              'rate_sigmasq' : rate_sigmasq}
     return (draws, accept_stats, data['mapping_peptides'])
 
-def worker(comm, rank, n_proc, data, init, cfg):
+def worker(comm, rank, n_proc, data, cfg):
     '''
     Worker-node process for parallel MCMC sampler.
     Receives parameters and commands from master node.
