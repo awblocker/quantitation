@@ -704,9 +704,9 @@ def worker(comm, rank, n_proc, data, init, cfg):
         return draws, data['mapping_peptides'], data['proteins_worker']
 
 
-def run(cfg, comm=None, chrom=1, null=False):
+def run(cfg, comm=None):
     '''
-    Coordinate parallel estimation based upon process rank.
+    Coordinate parallel MCMC and output based upon process rank.
 
     Parameters
     ----------
@@ -716,14 +716,7 @@ def run(cfg, comm=None, chrom=1, null=False):
         - comm : mpi4py.MPI.COMM
             Initialized MPI communicator. If None, it will be set to
             MPI.COMM_WORLD.
-        - chrom : int
-            Index (starting from 1) of chromosome to extract.
-        - null : bool
-            If null, use null reads instead of actual.
-
-    Returns
-    -------
-        For master process, dictionary from master() function. Else, None.
+        
     '''
     if comm is None:
         # Start MPI communications if no comm provided
