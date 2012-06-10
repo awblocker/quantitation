@@ -290,7 +290,7 @@ def master(comm, n_proc, data, cfg):
                     'tausq_dist' : 0,
                     'n_states_dist' : 0,
                     'eta' : 0}
-
+    
     # Start iterations
 
     # Loop for MCMC iterations
@@ -533,11 +533,19 @@ def worker(comm, rank, n_proc, data, cfg):
             # convenience
             var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
 
-            #
+            # Number of states parameters from local MAP estimator based on 
+            # number of observed peptides; very crude, but not altogether 
+            # terrible. Note that this ignores the +1 location shift in the 
+            # actual n_states distribution.
             kwargs = {'x' : n_obs_states_per_peptide[n_obs_states_per_peptide>0]
                             -1}
             kwargs.update(cfg['priors']['n_states_dist'])
             r, lmbda = lib.map_estimator_nbinom(**kwargs)
+            
+            # Combine local estimates at master for initialization.
+            # Values synchronize at first iteration during SYNC task.
+            comm.reduce([np.array(r, lmbda), MPI.FLOAT], None,
+                         op=MPI.SUM, root=MPIROOT)
         elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
             #   all other parameters. Exact draw via rejection samplers.
