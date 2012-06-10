@@ -40,9 +40,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
 
     Returns
     -------
-        - out : dictionary of output
+        - draws : dictionary
             1- and 2-dimensional ndarrays containing the posterior samples for
-            each parameter. Exact format and diagnostic information TBD.
+            each parameter.
+        - accept_stats : dictionary
+            Dictionary containing number of acceptances for each MH step.
 
     '''
     # Convert inputs to np.ndarrays as needed
