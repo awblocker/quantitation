@@ -261,7 +261,7 @@ def master(comm, n_proc, data, cfg):
 
     # Placeholders for r and lmbda
     r[0], lmbda[0] = (0, 0)
-    
+
     # Synchronize shared parameter values with workers
     # Still need to get r and lmbda squared-away after this
     params_shared = np.r_[shape_sigmasq[0], rate_sigmasq[0],
@@ -273,24 +273,24 @@ def master(comm, n_proc, data, cfg):
     for worker in xrange(1, n_workers+1):
         comm.Send([0, MPI.INT], dest=worker, tag=TAGS['SYNC'])
     comm.Bcast(params_shared, root=MPIROOT)
-    
+
     # Start initialization on workers
     for worker in xrange(1, n_workers+1):
         comm.Send([0, MPI.INT], dest=worker, tag=TAGS['INIT'])
 
     # Initialize r and lmbda by averaging MAP estimators from workers
-    r_lmbda_init = np.empty(2)
+    r_lmbda_init = np.zeros(2)
     buf = np.zeros(2)
     comm.Reduce([buf, MPI.FLOAT], [r_lmbda_init, MPI.FLOAT],
                 op=MPI.SUM, root=MPIROOT)
     r[0], lmbda[0] = r_lmbda_init / n_workers
-    
+
     # Initialize dictionary for acceptance statistics
     accept_stats = {'sigmasq_dist' : 0,
                     'tausq_dist' : 0,
                     'n_states_dist' : 0,
                     'eta' : 0}
-    
+
     # Start iterations
 
     # Loop for MCMC iterations
@@ -305,12 +305,12 @@ def master(comm, n_proc, data, cfg):
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
         comm.Bcast(params_shared, root=MPIROOT)
-        
-        
+
+
         # (1) Execute local update of protein-specific parameters on each worker
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['LOCAL'])
-        
+
 
         # (2) Update state-level variance hyperparameters (sigmasq
         #   distribution). Distributed conditional independence-chain MH step.
@@ -323,7 +323,7 @@ def master(comm, n_proc, data, cfg):
                                                 **cfg['priors']['sigmasq_dist'])
         (shape_sigmasq[t], rate_sigmasq[t]), accept = result
         accept_stats['sigmasq_dist'] += accept
-        
+
 
         # (3) Update peptide-level variance hyperparameters (tausq
         #   distribution). Distributed conditional independence-chain MH step.
@@ -336,7 +336,7 @@ def master(comm, n_proc, data, cfg):
                                                   **cfg['priors']['tausq_dist'])
         (shape_tausq[t], rate_tausq[t]), accept = result
         accept_stats['tausq_dist'] += accept
-        
+
 
         # (4) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
@@ -348,7 +348,7 @@ def master(comm, n_proc, data, cfg):
                                                **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
         accept_stats['n_states_dist'] += accept
-        
+
 
         # (5) Update coefficients of intensity-based probabilistic censoring
         #   model (eta). Distributed conditional independence-chain MH step.
@@ -359,14 +359,14 @@ def master(comm, n_proc, data, cfg):
                                                        b_prev=eta_draws[t-1],
                                                        MPIROOT=MPIROOT)
         accept_stats['eta'] += accept
-        
+
 
         # (6) Update random censoring probability. Distributed Gibbs step.
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['PRNDCEN'])
         p_rnd_cen[t] = lib.rgibbs_master_p_rnd_cen(comm=comm, MPIROOT=MPIROOT,
                                                    **cfg['priors']['p_rnd_cen'])
-        
+
 
         # Verbose output
         if (cfg['settings']['verbose'] > 0 and
@@ -534,18 +534,18 @@ def worker(comm, rank, n_proc, data, cfg):
             # convenience
             var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
 
-            # Number of states parameters from local MAP estimator based on 
-            # number of observed peptides; very crude, but not altogether 
-            # terrible. Note that this ignores the +1 location shift in the 
+            # Number of states parameters from local MAP estimator based on
+            # number of observed peptides; very crude, but not altogether
+            # terrible. Note that this ignores the +1 location shift in the
             # actual n_states distribution.
             kwargs = {'x' : n_obs_states_per_peptide[n_obs_states_per_peptide>0]
                             -1}
             kwargs.update(cfg['priors']['n_states_dist'])
             r, lmbda = lib.map_estimator_nbinom(**kwargs)
-            
+
             # Combine local estimates at master for initialization.
             # Values synchronize at first iteration during SYNC task.
-            comm.Reduce([np.array(r, lmbda), MPI.FLOAT], None,
+            comm.Reduce([np.array([r, lmbda]), MPI.FLOAT], None,
                          op=MPI.SUM, root=MPIROOT)
         elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
@@ -702,7 +702,7 @@ def worker(comm, rank, n_proc, data, cfg):
                             draws=draws,
                             mapping_peptides=data['mapping_peptides'],
                             proteins_worker=data['proteins_worker'])
-        
+
     # Setup draws to return
     draws = {'mu' : mu_draws,
              'gamma' : gamma_draws,
@@ -725,7 +725,7 @@ def run(cfg, comm=None):
         - comm : mpi4py.MPI.COMM
             Initialized MPI communicator. If None, it will be set to
             MPI.COMM_WORLD.
-        
+
     '''
     if comm is None:
         # Start MPI communications if no comm provided
@@ -756,7 +756,7 @@ def run(cfg, comm=None):
         draws, mapping_peptides, proteins_worker = worker(comm=comm, rank=rank,
                                                           n_proc=n_proc,
                                                           data=data, cfg=cfg)
-        
+
         # Construct path for worker-specific results
         path_worker = cfg['output']['pattern_results_worker'] % rank
 
