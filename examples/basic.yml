@@ -4,6 +4,15 @@ data:
     path_mapping_peptides: data/mapping_peptides_sim.txt
     sep_input: " "
 
+# Section for output information for MCMC
+output:
+    # Compression for pickled output
+    compress_pickle : bz2
+    # Path for master results
+    path_results_master: "test/draws_sim_master.pickle.bz2"
+    # Pattern (sprintf-style) for worker-specific results
+    pattern_results_worker: "test/draws_sim_worker-%03d.pickle.bz2"
+
 # Section for prior parameters
 priors:
     # Random censoring probability
