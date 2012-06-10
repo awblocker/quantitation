@@ -305,12 +305,12 @@ def master(comm, n_proc, data, cfg):
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
         comm.Bcast(params_shared, root=MPIROOT)
-
+        
 
         # (1) Execute local update of protein-specific parameters on each worker
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['LOCAL'])
-
+        
 
         # (2) Update state-level variance hyperparameters (sigmasq
         #   distribution). Distributed conditional independence-chain MH step.
@@ -323,7 +323,7 @@ def master(comm, n_proc, data, cfg):
                                                 **cfg['priors']['sigmasq_dist'])
         (shape_sigmasq[t], rate_sigmasq[t]), accept = result
         accept_stats['sigmasq_dist'] += accept
-
+        
 
         # (3) Update peptide-level variance hyperparameters (tausq
         #   distribution). Distributed conditional independence-chain MH step.
@@ -336,9 +336,9 @@ def master(comm, n_proc, data, cfg):
                                                   **cfg['priors']['tausq_dist'])
         (shape_tausq[t], rate_tausq[t]), accept = result
         accept_stats['tausq_dist'] += accept
+        
 
-
-        # (3) Update parameter for negative-binomial n_states distribution (r
+        # (4) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['NSTATES'])
@@ -348,9 +348,9 @@ def master(comm, n_proc, data, cfg):
                                                **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
         accept_stats['n_states_dist'] += accept
+        
 
-
-        # (4) Update coefficients of intensity-based probabilistic censoring
+        # (5) Update coefficients of intensity-based probabilistic censoring
         #   model (eta). Distributed conditional independence-chain MH step.
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['ETA'])
@@ -359,13 +359,14 @@ def master(comm, n_proc, data, cfg):
                                                        b_prev=eta_draws[t-1],
                                                        MPIROOT=MPIROOT)
         accept_stats['eta'] += accept
+        
 
-
-        # (5) Update random censoring probability. Distributed Gibbs step.
+        # (6) Update random censoring probability. Distributed Gibbs step.
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['PRNDCEN'])
         p_rnd_cen[t] = lib.rgibbs_master_p_rnd_cen(comm=comm, MPIROOT=MPIROOT,
                                                    **cfg['priors']['p_rnd_cen'])
+        
 
         # Verbose output
         if (cfg['settings']['verbose'] > 0 and
@@ -382,7 +383,7 @@ def master(comm, n_proc, data, cfg):
 
     # Halt all workers
     for worker in xrange(1, n_workers+1):
-        comm.Send([-1, MPI.INT], dest=worker, tag=TAGS['STOP'])
+        comm.Send([np.array(-1), MPI.INT], dest=worker, tag=TAGS['STOP'])
 
     # Build dictionary of master-exclusive draws to return
     draws = {'eta' : eta_draws,
@@ -652,6 +653,12 @@ def worker(comm, rank, n_proc, data, cfg):
                                                 rate_prev=rate_tausq,
                                                 MPIROOT=MPIROOT,
                                                 **cfg['priors']['tausq_dist'])
+        elif task == TAGS['NSTATES']:
+            # Run distributed MH step for n_states hyperparameters
+            lib.rmh_worker_nbinom_hyperparams(comm=comm, x=n_states_per_peptide,
+                                              r_prev=r, p_prev=lmbda,
+                                              MPIROOT=MPIROOT,
+                                              **cfg['priors']['n_states_dist'])
         elif task == TAGS['ETA']:
             # Run distributed MH step for eta (coefficients in censoring model)
 
@@ -669,8 +676,8 @@ def worker(comm, rank, n_proc, data, cfg):
             fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True)
 
             # Handle distributed computation draw
-            lib.rmh_worker_glm_coef(comm=comm, b_prev=eta, MPIROOT=MPIROOT,
-                                    y=y, X=X, **fit_eta)
+            lib.rmh_worker_glm_coef(comm=comm, b_prev=eta, family=logit_family,
+                                    y=y, X=X, MPIROOT=MPIROOT, **fit_eta)
         elif task == TAGS['PRNDCEN']:
             # Run distributed Gibbs step for p_rnd_cen
             lib.rgibbs_worker_p_rnd_cen(comm=comm,
@@ -739,7 +746,7 @@ def run(cfg, comm=None):
         path_master = cfg['output']['path_results_master']
 
         # Write master results to compressed file
-        write_to_pickle(path=path_master,
+        write_to_pickle(fname=path_master,
                         compress=cfg['output']['compress_pickle'],
                         draws=draws,
                         accept_stats=accept_stats,
@@ -753,7 +760,7 @@ def run(cfg, comm=None):
         path_worker = cfg['output']['pattern_results_worker'] % rank
 
         # Write worker-specific results to compressed file
-        write_to_pickle(path=path_worker,
+        write_to_pickle(fname=path_worker,
                         compress=cfg['output']['compress_pickle'],
                         draws=draws,
                         mapping_peptides=mapping_peptides,
