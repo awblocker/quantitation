@@ -293,7 +293,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         accept_stats['sigmasq_dist'] += accept
         
         
-        # (8) Update peptide-level variance hyperparameterse (tausq
+        # (8) Update peptide-level variance hyperparameters (tausq
         #   distribution). Conditional independence-chain MH step.
         result = lib.rmh_variance_hyperparams(variances=tausq_draws[t],
                                               shape_prev=shape_tausq[t-1],
