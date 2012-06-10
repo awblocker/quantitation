@@ -276,7 +276,7 @@ def master(comm, n_proc, data, cfg):
 
     # Start initialization on workers
     for worker in xrange(1, n_workers+1):
-        comm.Send([0, MPI.INT], dest=worker, tag=TAGS['SYNC'])
+        comm.Send([0, MPI.INT], dest=worker, tag=TAGS['INIT'])
 
     # Initialize r and lmbda by averaging MAP estimators from workers
     r_lmbda_init = np.empty(2)
