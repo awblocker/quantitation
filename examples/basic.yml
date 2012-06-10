@@ -57,4 +57,6 @@ settings:
     propDf: 3.
     verbose: 1
     verbose_interval: 500
+    n_strata: 10
+    seed_load_data: 0
 
