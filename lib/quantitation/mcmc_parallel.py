@@ -261,7 +261,7 @@ def master(comm, n_proc, data, cfg):
 
     # Placeholders for r and lmbda
     r[0], lmbda[0] = (0, 0)
-
+    
     # Synchronize shared parameter values with workers
     # Still need to get r and lmbda squared-away after this
     params_shared = np.r_[shape_sigmasq[0], rate_sigmasq[0],
@@ -273,7 +273,7 @@ def master(comm, n_proc, data, cfg):
     for worker in xrange(1, n_workers+1):
         comm.Send([0, MPI.INT], dest=worker, tag=TAGS['SYNC'])
     comm.Bcast(params_shared, root=MPIROOT)
-
+    
     # Start initialization on workers
     for worker in xrange(1, n_workers+1):
         comm.Send([0, MPI.INT], dest=worker, tag=TAGS['INIT'])
@@ -284,7 +284,7 @@ def master(comm, n_proc, data, cfg):
     comm.Reduce([buf, MPI.FLOAT], [r_lmbda_init, MPI.FLOAT],
                 op=MPI.SUM, root=MPIROOT)
     r[0], lmbda[0] = r_lmbda_init / n_workers
-
+    
     # Initialize dictionary for acceptance statistics
     accept_stats = {'sigmasq_dist' : 0,
                     'tausq_dist' : 0,
@@ -303,19 +303,19 @@ def master(comm, n_proc, data, cfg):
                               p_rnd_cen[t-1]]
 
         for worker in xrange(1, n_workers+1):
-            comm.Send([0, MPI.INT], dest=worker, tag=TAGS['SYNC'])
+            comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
         comm.Bcast(params_shared, root=MPIROOT)
 
 
         # (1) Execute local update of protein-specific parameters on each worker
         for worker in xrange(1, n_workers+1):
-            comm.Send([t, MPI.INT], dest=worker, tag=TAGS['LOCAL'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['LOCAL'])
 
 
         # (2) Update state-level variance hyperparameters (sigmasq
         #   distribution). Distributed conditional independence-chain MH step.
         for worker in xrange(1, n_workers+1):
-            comm.Send([t, MPI.INT], dest=worker, tag=TAGS['SIGMA'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['SIGMA'])
 
         result = lib.rmh_master_variance_hyperparams(comm=comm,
                                                 shape_prev=shape_sigmasq[t-1],
@@ -328,7 +328,7 @@ def master(comm, n_proc, data, cfg):
         # (3) Update peptide-level variance hyperparameters (tausq
         #   distribution). Distributed conditional independence-chain MH step.
         for worker in xrange(1, n_workers+1):
-            comm.Send([t, MPI.INT], dest=worker, tag=TAGS['TAU'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['TAU'])
 
         result = lib.rmh_master_variance_hyperparams(comm=comm,
                                                   shape_prev=shape_tausq[t-1],
@@ -341,7 +341,7 @@ def master(comm, n_proc, data, cfg):
         # (3) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
         for worker in xrange(1, n_workers+1):
-            comm.Send([t, MPI.INT], dest=worker, tag=TAGS['NSTATES'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['NSTATES'])
 
         result = lib.rmh_master_nbinom_hyperparams(comm=comm,
                                                r_prev=r[t-1], p_prev=lmbda[t-1],
@@ -353,7 +353,7 @@ def master(comm, n_proc, data, cfg):
         # (4) Update coefficients of intensity-based probabilistic censoring
         #   model (eta). Distributed conditional independence-chain MH step.
         for worker in xrange(1, n_workers+1):
-            comm.Send([t, MPI.INT], dest=worker, tag=TAGS['ETA'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['ETA'])
 
         eta_draws[t], accept = lib.rmh_master_glm_coef(comm=comm,
                                                        b_prev=eta_draws[t-1],
@@ -363,7 +363,7 @@ def master(comm, n_proc, data, cfg):
 
         # (5) Update random censoring probability. Distributed Gibbs step.
         for worker in xrange(1, n_workers+1):
-            comm.Send([t, MPI.INT], dest=worker, tag=TAGS['PRNDCEN'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['PRNDCEN'])
         p_rnd_cen[t] = lib.rgibbs_master_p_rnd_cen(comm=comm, MPIROOT=MPIROOT,
                                                    **cfg['priors']['p_rnd_cen'])
 
@@ -544,7 +544,7 @@ def worker(comm, rank, n_proc, data, cfg):
             
             # Combine local estimates at master for initialization.
             # Values synchronize at first iteration during SYNC task.
-            comm.reduce([np.array(r, lmbda), MPI.FLOAT], None,
+            comm.Reduce([np.array(r, lmbda), MPI.FLOAT], None,
                          op=MPI.SUM, root=MPIROOT)
         elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
@@ -560,9 +560,9 @@ def worker(comm, rank, n_proc, data, cfg):
 
             # (1b) Draw number of censored states per peptide
             n_cen_states_per_peptide = lib.rncen(n_obs=n_obs_states_per_peptide,
-                                                p_rnd_cen=p_rnd_cen[t-1],
+                                                p_rnd_cen=p_rnd_cen,
                                                 p_int_cen=cen_dist['p_int_cen'],
-                                                lmbda=lmbda[t-1], r=r[t-1])
+                                                lmbda=lmbda, r=r)
             n_cen_states_per_peptide_draws[t] = n_cen_states_per_peptide
             # Update state-level counts
             n_states_per_peptide = (n_obs_states_per_peptide +
@@ -573,7 +573,7 @@ def worker(comm, rank, n_proc, data, cfg):
 
             # (1c) Draw censored intensities
             kwargs['n_cen'] = n_cen_states_per_peptide
-            kwargs['p_rnd_cen'] = p_rnd_cen[t-1]
+            kwargs['p_rnd_cen'] = p_rnd_cen
             kwargs['propDf'] = cfg['settings']['propDf']
             kwargs.update(cen_dist)
             intensities_cen, mapping_states_cen, W = lib.rintensities_cen(**kwargs)
@@ -621,8 +621,8 @@ def worker(comm, rank, n_proc, data, cfg):
                                           minlength=n_proteins)
             sigmasq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
                                                 n=n_states_per_protein,
-                                                prior_shape=shape_sigmasq[t-1],
-                                                prior_rate=rate_sigmasq[t-1])
+                                                prior_shape=shape_sigmasq,
+                                                prior_rate=rate_sigmasq)
 
             # Mapping from protein to peptide conditional variances for
             # convenience
@@ -634,22 +634,22 @@ def worker(comm, rank, n_proc, data, cfg):
                                          weights=rss_by_peptide)
             tausq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
                                                   n=n_peptides_per_protein,
-                                                  prior_shape=shape_tausq[t-1],
-                                                  prior_rate=rate_tausq[t-1])
+                                                  prior_shape=shape_tausq,
+                                                  prior_rate=rate_tausq)
         elif task == TAGS['SIGMA']:
             # Run distributed MH step for sigmasq hyperparameters
             lib.rmh_worker_variance_hyperparams(comm=comm,
                                                 variances=sigmasq_draws[t],
-                                                shape_prev=shape_sigmasq[t-1],
-                                                rate_prev=rate_sigmasq[t-1],
+                                                shape_prev=shape_sigmasq,
+                                                rate_prev=rate_sigmasq,
                                                 MPIROOT=MPIROOT,
                                                 **cfg['priors']['sigmasq_dist'])
         elif task == TAGS['TAU']:
             # Run distributed MH step for sigmasq hyperparameters
             lib.rmh_worker_variance_hyperparams(comm=comm,
                                                 variances=tausq_draws[t],
-                                                shape_prev=shape_tausq[t-1],
-                                                rate_prev=rate_tausq[t-1],
+                                                shape_prev=shape_tausq,
+                                                rate_prev=rate_tausq,
                                                 MPIROOT=MPIROOT,
                                                 **cfg['priors']['tausq_dist'])
         elif task == TAGS['ETA']:
