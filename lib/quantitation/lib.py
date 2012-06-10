@@ -1572,6 +1572,9 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     theta_prev  = np.log(np.array([shape_prev, rate_prev]))
     z_prev      = np.dot(U, theta_prev - theta_hat)
 
+    # Broadcast theta_prop to workers
+    comm.Bcast([theta_prop, MPI.FLOAT], root=MPIROOT)
+    
     # Compute log-ratio of target densities.
     # Start by obtaining likelihood component from workers.
     log_target_ratio = np.array(0.)
@@ -1605,9 +1608,6 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
                              np.log(1. + z_prev**2/propDf))
     log_prop_ratio *= (propDf+1.)/2.
     log_prop_ratio += -np.sum(theta_prop - theta_prev)
-    
-    # Broadcast theta_prop to workers
-    comm.Bcast([theta_prop, MPI.FLOAT], root=MPIROOT)
     
     # Execute MH update
     return mh_update(prop=(shape_prop, rate_prop), prev=(shape_prev, rate_prev),
