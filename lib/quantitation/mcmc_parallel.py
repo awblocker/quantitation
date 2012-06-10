@@ -490,10 +490,11 @@ def worker(comm, rank, n_proc, data, cfg):
     while working:
         # Receive iteration and task information
         comm.Recv([t, MPI.INT], source=MPIROOT, tag=MPI.ANY_TAG, status=status)
+        task = status.Get_tag()
 
-        if status.Get_tag() == TAGS['STOP']:
+        if task == TAGS['STOP']:
             working = False
-        elif status.Get_tag() == TAGS['SYNC']:
+        elif task == TAGS['SYNC']:
             # Synchronize shared parameters/hyperparameters
             comm.Bcast(params_shared, root=MPIROOT)
 
@@ -502,7 +503,7 @@ def worker(comm, rank, n_proc, data, cfg):
             r, lmbda                    = params_shared[4:6]
             eta                         = params_shared[6:8]
             p_rnd_cen                   = params_shared[8]
-        elif status.Get_tag() == TAGS['INIT']:
+        elif task == TAGS['INIT']:
             # Compute initial values for MCMC iterations
 
             # Protein-level means using mean observed intensity; excluding
@@ -537,7 +538,7 @@ def worker(comm, rank, n_proc, data, cfg):
                             -1}
             kwargs.update(cfg['priors']['n_states_dist'])
             r, lmbda = lib.map_estimator_nbinom(**kwargs)
-        elif status.Get_tag() == TAGS['LOCAL']:
+        elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
             #   all other parameters. Exact draw via rejection samplers.
 
@@ -627,7 +628,7 @@ def worker(comm, rank, n_proc, data, cfg):
                                                   n=n_peptides_per_protein,
                                                   prior_shape=shape_tausq[t-1],
                                                   prior_rate=rate_tausq[t-1])
-        elif status.Get_tag() == TAGS['SIGMA']:
+        elif task == TAGS['SIGMA']:
             # Run distributed MH step for sigmasq hyperparameters
             lib.rmh_worker_variance_hyperparams(comm=comm,
                                                 variances=sigmasq_draws[t],
@@ -635,7 +636,7 @@ def worker(comm, rank, n_proc, data, cfg):
                                                 rate_prev=rate_sigmasq[t-1],
                                                 MPIROOT=MPIROOT,
                                                 **cfg['priors']['sigmasq_dist'])
-        elif status.Get_tag() == TAGS['TAU']:
+        elif task == TAGS['TAU']:
             # Run distributed MH step for sigmasq hyperparameters
             lib.rmh_worker_variance_hyperparams(comm=comm,
                                                 variances=tausq_draws[t],
@@ -643,7 +644,7 @@ def worker(comm, rank, n_proc, data, cfg):
                                                 rate_prev=rate_tausq[t-1],
                                                 MPIROOT=MPIROOT,
                                                 **cfg['priors']['tausq_dist'])
-        elif status.Get_tag() == TAGS['ETA']:
+        elif task == TAGS['ETA']:
             # Run distributed MH step for eta (coefficients in censoring model)
 
             # Build design matrix and response. Only using observed and
@@ -662,13 +663,13 @@ def worker(comm, rank, n_proc, data, cfg):
             # Handle distributed computation draw
             lib.rmh_worker_glm_coef(comm=comm, b_prev=eta, MPIROOT=MPIROOT,
                                     y=y, X=X, **fit_eta)
-        elif status.Get_tag() == TAGS['PRNDCEN']:
+        elif task == TAGS['PRNDCEN']:
             # Run distributed Gibbs step for p_rnd_cen
             lib.rgibbs_worker_p_rnd_cen(comm=comm,
                                         n_rnd_cen=np.sum(W, dtype=np.int),
                                         n_states=n_states,
                                         MPIROOT=MPIROOT)
-        elif status.Get_tag() == TAGS['SAVE']:
+        elif task == TAGS['SAVE']:
             # Construct path for worker-specific results
             path_worker = cfg['output']['pattern_results_worker'] % rank
 
@@ -685,15 +686,15 @@ def worker(comm, rank, n_proc, data, cfg):
                             draws=draws,
                             mapping_peptides=data['mapping_peptides'],
                             proteins_worker=data['proteins_worker'])
-
-        # Setup draws to return
-        draws = {'mu' : mu_draws,
-                 'gamma' : gamma_draws,
-                 'sigmasq' : sigmasq_draws,
-                 'tausq' : tausq_draws,
-                 'n_cen_states_per_peptide':n_cen_states_per_peptide_draws,
-                 }
-        return draws, data['mapping_peptides'], data['proteins_worker']
+        
+    # Setup draws to return
+    draws = {'mu' : mu_draws,
+             'gamma' : gamma_draws,
+             'sigmasq' : sigmasq_draws,
+             'tausq' : tausq_draws,
+             'n_cen_states_per_peptide':n_cen_states_per_peptide_draws,
+             }
+    return draws, data['mapping_peptides'], data['proteins_worker']
 
 
 def run(cfg, comm=None):
@@ -739,7 +740,7 @@ def run(cfg, comm=None):
         draws, mapping_peptides, proteins_worker = worker(comm=comm, rank=rank,
                                                           n_proc=n_proc,
                                                           data=data, cfg=cfg)
-
+        
         # Construct path for worker-specific results
         path_worker = cfg['output']['pattern_results_worker'] % rank
 
