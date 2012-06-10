@@ -306,7 +306,7 @@ def master(comm, n_proc, data, cfg):
             comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
         comm.Bcast(params_shared, root=MPIROOT)
         
-
+        
         # (1) Execute local update of protein-specific parameters on each worker
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['LOCAL'])
@@ -655,7 +655,8 @@ def worker(comm, rank, n_proc, data, cfg):
                                                 **cfg['priors']['tausq_dist'])
         elif task == TAGS['NSTATES']:
             # Run distributed MH step for n_states hyperparameters
-            lib.rmh_worker_nbinom_hyperparams(comm=comm, x=n_states_per_peptide,
+            lib.rmh_worker_nbinom_hyperparams(comm=comm,
+                                              x=n_states_per_peptide-1,
                                               r_prev=r, p_prev=lmbda,
                                               MPIROOT=MPIROOT,
                                               **cfg['priors']['n_states_dist'])
