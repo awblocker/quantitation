@@ -20,7 +20,7 @@ script is designed to be called directly from mpiexec with the desired number of
 processors allocated via -n. It uses MPI_COMM_WORLD and has no dynamic process
 management of its own.
 
-Writes MCMC output to paths specificed in each CONFIG. Output consists of one
+Writes MCMC output to paths specified in each CONFIG. Output consists of one
 file with master-process output and n_workers files with worker-process output
 per CONFIG file.
 

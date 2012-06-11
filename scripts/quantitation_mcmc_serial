@@ -17,7 +17,7 @@ Usage: quantitation_mcmc_serial [options] CONFIG [CONFIG]
 
 Runs serial MCMC sampler for absolute quantitation from LC/MSMS data.
 
-Writes MCMC output to path specificed in each CONFIG file for combined results.
+Writes MCMC output to path specified in each CONFIG file for combined results.
 
 Options:
   -h, --help            Show this help message and exit

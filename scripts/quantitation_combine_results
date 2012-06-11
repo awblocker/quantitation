@@ -19,11 +19,11 @@ Combines results from parallel MCMC sampler for absolute quantitation from
 LC/MSMS data. This should be run only after running quantitation_mcmc_parallel.
 It is not necessary after running quantitation_mcmc_serial.
 
-Reads MCMC output from paths specificed in each CONFIG. Input consists of one
+Reads MCMC output from paths specified in each CONFIG. Input consists of one
 file with master-process output and n_workers files with worker process output
 per CONFIG file.
 
-Writes combined MCMC output to path specificed in each CONFIG file for combined
+Writes combined MCMC output to path specified in each CONFIG file for combined
 results.
 
 Options:
