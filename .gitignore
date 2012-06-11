@@ -24,6 +24,9 @@ mcmcDraws/*
 # vim sessions
 *.vim
 
+# Scratch work
+scratch/
+
 # Github python default
 *.py[co]
 
