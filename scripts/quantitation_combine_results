@@ -8,6 +8,7 @@ import cPickle
 import bz2
 import gzip
 import contextlib
+import itertools
 
 import yaml
 import numpy as np
@@ -18,7 +19,7 @@ from quantitation import mcmc_parallel
 # Define constants
 
 HELP = '''
-Usage: quantitation_combine_results [options] CONFIG [CONFIG]
+Usage: quantitation_combine_results [options] CONFIG N_WORKERS [...]
 
 Combines results from parallel MCMC sampler for absolute quantitation from
 LC/MSMS data. This should be run only after running quantitation_mcmc_parallel.
@@ -68,14 +69,16 @@ def main(argv):
             print >> sys.stderr, "Error -- unknown option %s" % option
             sys.exit(1)
 
-    if len(args) > 0:
-        cfg_paths = args
+    if len(args) > 1:
+        cfg_paths = args[::2]
+        list_n_workers = [int(x) for x in args[1::2]]
     else:
-        print >> sys.stderr, "Error -- need path to YAML configuration"
+        print >> sys.stderr, ("Error -- need path to YAML configuration"
+                              "and n_workers")
         sys.exit(1)
 
     # Iterate over configuration files
-    for cfg_path in cfg_paths:
+    for cfg_path, n_workers in itertools.izip(cfg_paths, list_n_workers):
         # Parse YAML configuration
         cfg_file = open(cfg_path, 'rb')
         cfg = yaml.load(cfg_file)
@@ -97,7 +100,7 @@ def main(argv):
             fload = gzip.GzipFile
         
         # Start timing, if requested
-        if timing and comm.Get_rank() == 0:
+        if timing:
             time_start = time.time()
 
         # Load master draws

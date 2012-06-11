@@ -95,7 +95,7 @@ def main(argv):
             fload = gzip.GzipFile
         
         # Start timing, if requested
-        if timing and comm.Get_rank() == 0:
+        if timing:
             time_start = time.time()
 
         # Load combined results
@@ -119,8 +119,8 @@ def main(argv):
                                   means=means,
                                   variances=variances,
                                   stderror=stderrors,
-                                  accept_stats=accept_stats,
-                                  mapping_peptides=mapping_peptides)
+                                  accept_stats=results['accept_stats'],
+                                  mapping_peptides=results['mapping_peptides'])
         
         # Wrap-up timing, if requested
         if timing:
