@@ -4,6 +4,7 @@
 import sys
 import getopt
 import time
+import cPickle
 import bz2
 import gzip
 import contextlib
