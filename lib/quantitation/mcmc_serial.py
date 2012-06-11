@@ -145,7 +145,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     # Number of states parameters from MAP estimator based on number of observed
     # peptides; very crude, but not altogether terrible. Note that this ignores
     # the +1 location shift in the actual n_states distribution.
-    kwargs = {'x' : n_obs_states_per_peptide[n_obs_states_per_peptide>0]-1}
+    kwargs = {'x' : n_obs_states_per_peptide[n_obs_states_per_peptide>0]-1,
+              'transform' : True}
     kwargs.update(cfg['priors']['n_states_dist'])
     r[0], lmbda[0] = lib.map_estimator_nbinom(**kwargs)
 
