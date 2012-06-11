@@ -12,6 +12,10 @@ output:
     path_results_master: "test/draws_sim-big_master.pickle.bz2"
     # Pattern (sprintf-style) for worker-specific results
     pattern_results_worker: "test/draws_sim-big_worker-%03d.pickle.bz2"
+    # Path for combined and serial results
+    path_results_combined: "test/draws_sim-big.pickle.bz2"
+    # Path for posterior summaries and diagnostics
+    path_summaries: "test/summaries_sim-big.pickle.bz2"
 
 # Section for prior parameters
 priors:
