@@ -179,7 +179,7 @@ def load_data(cfg, rank=None, n_workers=None):
     return data
 
 
-def master(comm, n_proc, data, cfg):
+def master(comm, data, cfg):
     '''
     Master node process for parallel MCMC. Coordinates draws, handles all
     region-level parameter draws, and collects results.
@@ -188,10 +188,8 @@ def master(comm, n_proc, data, cfg):
     ----------
         - comm : mpi4py.MPI.COMM
             Initialized MPI communicator.
-        - n_proc : int
-            Number of processes in communicator.
         - data : dictionary
-            Data as output from load_data.
+            Data as output from load_data with rank==0.
         - cfg : dictionary
             Dictionary containing (at least) prior and estimation_params
             sections with appropriate entries.
@@ -393,7 +391,7 @@ def master(comm, n_proc, data, cfg):
              'rate_sigmasq' : rate_sigmasq}
     return (draws, accept_stats, data['mapping_peptides'])
 
-def worker(comm, rank, n_proc, data, cfg):
+def worker(comm, rank, data, cfg):
     '''
     Worker-node process for parallel MCMC sampler.
     Receives parameters and commands from master node.
@@ -405,10 +403,8 @@ def worker(comm, rank, n_proc, data, cfg):
             Initialized MPI communicator.
         - rank : int
             Rank (>= MPIROOT) of worker.
-        - n_proc : int
-            Number of processes in communicator.
         - data : dictionary
-            Data as output from load_data.
+            Data as output from load_data with rank > 0.
         - init : dictionary
             Initial parameter values as output from initialize.
         - cfg : dictionary
@@ -738,7 +734,7 @@ def run(cfg, comm=None):
 
     if rank == MPIROOT:
         # Run estimation
-        draws, accept_stats, mapping_peptides = master(comm=comm, n_proc=n_proc,
+        draws, accept_stats, mapping_peptides = master(comm=comm,
                                                        data=data, cfg=cfg)
 
         # Construct path for master results
@@ -752,7 +748,6 @@ def run(cfg, comm=None):
                         mapping_peptides=mapping_peptides)
     else:
         draws, mapping_peptides, proteins_worker = worker(comm=comm, rank=rank,
-                                                          n_proc=n_proc,
                                                           data=data, cfg=cfg)
 
         # Construct path for worker-specific results
