@@ -1,0 +1,131 @@
+#!python
+
+# Load libraries
+import sys
+import getopt
+import time
+
+import yaml
+import numpy as np
+
+import quantitation
+
+# Define constants
+
+HELP = '''
+Usage: quantitation_combine_results [options] CONFIG [CONFIG]
+
+Combines results from parallel MCMC sampler for absolute quantitation from
+LC/MSMS data. This should be run only after running quantitation_mcmc_parallel.
+It is not necessary after running quantitation_mcmc_serial.
+
+Reads MCMC output from paths specificed in each CONFIG. Input consists of one
+file with master-process output and n_workers files with worker process output
+per CONFIG file.
+
+Writes combined MCMC output to path specificed in each CONFIG file for combined
+results.
+
+Options:
+  -h, --help            Show this help message and exit
+  --time                Time combining process; writes timing information to
+                        stderr
+
+Details of the required format for the YAML CONFIG files can be found it further
+documentation.
+'''
+
+TIMING_MSG = '''
+Combinging process used %f seconds.
+'''
+
+def main(argv):
+    '''
+    Main function for option-parsing and startup.
+    
+    Takes sys.argv[1:] as input.
+    '''
+    # Set default values for options
+    timing = False
+    
+    # Parse arguments and options
+    opts, args = getopt.getopt(argv, "h",
+                               ["help"])
+    for option, value in opts:
+        if option in ('-h', "--help"):
+            print >> sys.stderr, HELP
+            sys.exit(2)
+        elif option=='--time':
+            timing = True
+        else:
+            print >> sys.stderr, "Error -- unknown option %s" % option
+            sys.exit(1)
+
+    if len(args) > 0:
+        cfg_paths = args
+    else:
+        print >> sys.stderr, "Error -- need path to YAML configuration"
+        sys.exit(1)
+
+    # Iterate over configuration files
+    for cfg_path in cfg_paths:
+        # Parse YAML configuration
+        cfg_file = open(cfg_path, 'rb')
+        cfg = yaml.load(cfg_file)
+        cfg_file.close()
+
+        # Determine type of compression used
+        compress = cfg['output']['compress_pickle']
+
+        # Check for validity of compression
+        if compress not in (None, 'bz2', 'gz'):
+            raise ValueError('Invalid value for compress.')
+
+        # Prepare to open files, depending up compression requested
+        if compress is None:
+            fload = open
+        elif compress == 'bz2':
+            fload = bz2.BZ2File
+        elif compress == 'gz':
+            fload = gzip.GzipFile
+        
+        # Start timing, if requested
+        if timing and comm.Get_rank() == 0:
+            time_start = time.time()
+
+        # Load master draws
+        path_results_master = cfg['output']['path_results_master']
+        with contextlib.closing(fload(path_results_master, 'rb')) as f:
+            result_master = cPickle.load(f)
+
+        # Load worker draws
+        list_results_workers = []
+
+        for worker in xrange(1, n_workers+1):
+            path_worker = cfg['output']['pattern_results_worker'] % worker
+
+            with contextlib.closing(fload(path_worker, 'rb')) as f:
+                list_results_workers.append(cPickle.load(f))
+
+        # Combine results
+        results_combined = mcmc_parallel.combine_results(result_master,
+                                                         list_results_workers,
+                                                         cfg)
+        draws, accept_stats, mapping_peptides = results_combined
+
+        # Write combined results to file with appropriate compression
+        path_results = cfg['output']['path_results_combined']
+        quantitation.write_to_pickle(fname=path_results,
+                                     compress=compress,
+                                     draws=draws,
+                                     accept_stats=accept_stats,
+                                     mapping_peptides=mapping_peptides)
+        
+        # Wrap-up timing, if requested
+        if timing:
+            time_done = time.time()
+            print >> sys.stderr, TIMING_MSG % (time_done-time_start,)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+
