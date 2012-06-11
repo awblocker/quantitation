@@ -1,14 +1,29 @@
 from distutils.core import setup
 
-# Keeping all Python code for package in src directory
+# Keeping all Python code for package in lib directory
+NAME = 'quantitation'
+VERSION = '0.1'
+AUTHOR = 'Alexander W Blocker'
+AUTHOR_EMAIL = 'ablocker@gmail.com'
+URL = 'http://www.awblocker.com'
+DESCRIPTION = 'Absolute quantitation for LC/MSMS proteomics via MCMC'
 
-setup(name='quantitation',
-      url='http://www.awblocker.com',
-      version='0.1',
-      description='Absolute quantitation for LC/MSMS proteomics via MCMC',
-      author='Alexander W Blocker',
-      author_email='ablocker@gmail.com',
-      packages=['quantitation','quantitation.glm'],
-      package_dir = {'': 'lib'},
-      requires=['numpy(>=1.6)','scipy(>=0.9)']
+REQUIRES = ['numpy(>=1.6)','scipy(>=0.9)', 'yaml', 'mpi4py']
+
+PACKAGE_DIR = {'': 'lib'}
+PACKAGES = ['quantitation','quantitation.glm']
+SCRIPTS = ('mcmc_serial', 'mcmc_parallel', 'combine_results', 'summarize')
+SCRIPTS = ['scripts/quantitation_' + script for script in SCRIPTS]
+
+setup(name=NAME,
+      url=URL,
+      version=VERSION,
+      description=DESCRIPTION,
+      author=AUTHOR,
+      author_email=AUTHOR_EMAIL,
+      packages=PACKAGES,
+      package_dir=PACKAGE_DIR,
+      scripts=SCRIPTS,
+      requires=REQUIRES
       )
+
