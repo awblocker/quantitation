@@ -9,6 +9,7 @@ import yaml
 import numpy as np
 
 import quantitation
+from quantitation import mcmc_parallel
 
 # Define constants
 
