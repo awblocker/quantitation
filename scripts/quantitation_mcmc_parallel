@@ -90,8 +90,8 @@ def main(argv):
         if timing and comm.Get_rank() == 0:
             time_done = time.time()
             print >> sys.stderr, TIMING_MSG % (cfg_path,
-                                               cfg['settings']['n_iterations'],
                                                time_done-time_start,
+                                               cfg['settings']['n_iterations'],
                                                (time_done-time_start) /
                                                cfg['settings']['n_iterations'],
                                                comm.Get_size())
