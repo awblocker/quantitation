@@ -95,7 +95,8 @@ def main(argv):
         quantitation.write_to_pickle(fname=path_results,
                                      compress=compress,
                                      draws=draws,
-                                     accept_stats=accept_stats)
+                                     accept_stats=accept_stats,
+                                     mapping_peptides=mapping_peptides)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
