@@ -1,7 +1,4 @@
 import sys
-import bz2
-import gzip
-import cPickle
 
 import numpy as np
 from mpi4py import MPI
@@ -708,11 +705,11 @@ def worker(comm, rank, data, cfg):
                      'n_cen_states_per_peptide':n_cen_states_per_peptide_draws,
                      }
 
-            write_to_pickle(path=path_worker,
-                            compress=cfg['output']['compress_pickle'],
-                            draws=draws,
-                            mapping_peptides=data['mapping_peptides'],
-                            proteins_worker=data['proteins_worker'])
+            lib.write_to_pickle(path=path_worker,
+                                compress=cfg['output']['compress_pickle'],
+                                draws=draws,
+                                mapping_peptides=data['mapping_peptides'],
+                                proteins_worker=data['proteins_worker'])
 
     # Setup draws to return
     draws = {'mu' : mu_draws,
@@ -760,11 +757,11 @@ def run(cfg, comm=None):
         path_master = cfg['output']['path_results_master']
 
         # Write master results to compressed file
-        write_to_pickle(fname=path_master,
-                        compress=cfg['output']['compress_pickle'],
-                        draws=draws,
-                        accept_stats=accept_stats,
-                        mapping_peptides=mapping_peptides)
+        lib.write_to_pickle(fname=path_master,
+                            compress=cfg['output']['compress_pickle'],
+                            draws=draws,
+                            accept_stats=accept_stats,
+                            mapping_peptides=mapping_peptides)
     else:
         result_worker = worker(comm=comm, rank=rank, data=data, cfg=cfg)
         draws, mapping_peptides = result_worker[:2]
@@ -774,43 +771,12 @@ def run(cfg, comm=None):
         path_worker = cfg['output']['pattern_results_worker'] % rank
 
         # Write worker-specific results to compressed file
-        write_to_pickle(fname=path_worker,
-                        compress=cfg['output']['compress_pickle'],
-                        draws=draws,
-                        mapping_peptides=mapping_peptides,
-                        proteins_worker=proteins_worker,
-                        peptides_worker=peptides_worker)
-
-def write_to_pickle(fname, compress='bz2', **kwargs):
-    '''
-    Pickle **kwargs to fname, potentially with compression.
-
-    Parameters
-    ----------
-        - fname : filename
-        - compress : string or None
-            Compression to use when saving. Can be None, 'bz2', or 'gz'.
-    '''
-    # Check input validity
-    if type(fname) is not str:
-        raise TypeError('fname must be a path to a writable file.')
-
-    if compress not in (None, 'bz2', 'gz'):
-        raise ValueError('Invalid value for compress.')
-
-    # Open file, depending up compression requested
-    if compress is None:
-        out_file = open(fname, 'wb')
-    elif compress == 'bz2':
-        out_file = bz2.BZ2File(fname, 'wb')
-    elif compress == 'gz':
-        out_file = gzip.GzipFile(fname, 'wb')
-
-    # Write other arguments to file
-    cPickle.dump(kwargs, out_file, protocol=-1)
-
-    # Close file used for output
-    out_file.close()
+        lib.write_to_pickle(fname=path_worker,
+                            compress=cfg['output']['compress_pickle'],
+                            draws=draws,
+                            mapping_peptides=mapping_peptides,
+                            proteins_worker=proteins_worker,
+                            peptides_worker=peptides_worker)
 
 def combine_results(result_master, list_results_workers, cfg):
     '''

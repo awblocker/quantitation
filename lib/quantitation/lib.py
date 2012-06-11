@@ -1,7 +1,10 @@
 # Functions for the individual state level model with random censoring, common
 # variance and negative binomial counts for the number of states for each
 # peptide.
+import bz2
 import copy
+import cPickle
+import gzip
 
 import numpy as np
 from scipy import special
@@ -1918,3 +1921,211 @@ def rgibbs_master_p_rnd_cen(comm, MPIROOT=0, prior_a=1., prior_b=1.):
                                b=n_states-n_rnd_cen+prior_b)
     return p_rnd_cen
 
+#==============================================================================
+# General-purpose MCMC diagnostic and summarization functions
+#==============================================================================
+
+def effective_sample_sizes(**kwargs):
+    '''
+    Estimate effective sample size for each input using AR(1) approximation.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+    
+    Parameters
+    ----------
+        - **kwargs
+            Names and arrays of MCMC draws.
+    
+    Returns
+    -------
+        - If only one array of draws is provided, a single array containing the
+          effective sample size(s) for those variables.
+        - If multiple arrays are provided, a dictionary with keys identical to
+          those provided as parameters and one array per input containing
+          effective sample size(s).
+    
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+    
+    # Allocate empty dictionary for results
+    ess = {}
+    
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:,np.newaxis]
+        
+        # Demean the draws
+        draws = draws - draws.mean(axis=0)
+        
+        # Compute lag-1 autocorrelation by column
+        acf = np.mean(draws[1:]*draws[:-1], axis=0) / np.var(draws, axis=0)
+    
+        # Compute ess from ACF
+        ess[var] = np.shape(draws)[0]*(1.-acf)/(1.+acf)
+    
+    if len(kwargs) > 1:
+        return ess
+    else:
+        return ess[kwargs.keys()[0]]
+
+def posterior_means(**kwargs):
+    '''
+    Estimate posterior means from inputs.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+    
+    Parameters
+    ----------
+        - **kwargs
+            Names and arrays of MCMC draws.
+    
+    Returns
+    -------
+        - If only one array of draws is provided, a single array containing the
+          posterior mean estimate(s) for those variables.
+        - If multiple arrays are provided, a dictionary with keys identical to
+          those provided as parameters and one array per input containing
+          posterior mean estimate(s).
+    
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+    
+    # Allocate empty dictionary for results
+    means = {}
+    
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:,np.newaxis]
+        
+        # Estimate posterior means
+        means[var] = np.mean(draws, 0)
+    
+    if len(kwargs) > 1:
+        return means
+    else:
+        return means[kwargs.keys()[0]]
+
+def posterior_variances(**kwargs):
+    '''
+    Estimate posterior variances from inputs.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+    
+    Parameters
+    ----------
+        - **kwargs
+            Names and arrays of MCMC draws.
+    
+    Returns
+    -------
+        - If only one array of draws is provided, a single array containing the
+          posterior variance estimate(s) for those variables.
+        - If multiple arrays are provided, a dictionary with keys identical to
+          those provided as parameters and one array per input containing
+          posterior variance estimate(s).
+    
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+    
+    # Allocate empty dictionary for results
+    variances = {}
+    
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:,np.newaxis]
+        
+        # Estimate posterior means
+        variances[var] = np.var(draws, 0)
+    
+    if len(kwargs) > 1:
+        return variances
+    else:
+        return variances[kwargs.keys()[0]]
+
+def posterior_stderrors(**kwargs):
+    '''
+    Estimate posterior standard errors from inputs.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+    
+    Parameters
+    ----------
+        - **kwargs
+            Names and arrays of MCMC draws.
+    
+    Returns
+    -------
+        - If only one array of draws is provided, a single array containing the
+          posterior standard error estimate(s) for those variables.
+        - If multiple arrays are provided, a dictionary with keys identical to
+          those provided as parameters and one array per input containing
+          posterior standard error estimate(s).
+    
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+    
+    # Allocate empty dictionary for results
+    stderrors = {}
+    
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:,np.newaxis]
+        
+        # Estimate posterior means
+        stderrors[var] = np.std(draws, 0)
+    
+    if len(kwargs) > 1:
+        return stderrors
+    else:
+        return stderrors[kwargs.keys()[0]]
+
+#==============================================================================
+# General-purpose IO functions
+#==============================================================================
+
+def write_to_pickle(fname, compress='bz2', **kwargs):
+    '''
+    Pickle **kwargs to fname, potentially with compression.
+
+    Parameters
+    ----------
+        - fname : filename
+        - compress : string or None
+            Compression to use when saving. Can be None, 'bz2', or 'gz'.
+    '''
+    # Check input validity
+    if type(fname) is not str:
+        raise TypeError('fname must be a path to a writable file.')
+
+    if compress not in (None, 'bz2', 'gz'):
+        raise ValueError('Invalid value for compress.')
+
+    # Open file, depending up compression requested
+    if compress is None:
+        out_file = open(fname, 'wb')
+    elif compress == 'bz2':
+        out_file = bz2.BZ2File(fname, 'wb')
+    elif compress == 'gz':
+        out_file = gzip.GzipFile(fname, 'wb')
+
+    # Write other arguments to file
+    cPickle.dump(kwargs, out_file, protocol=-1)
+
+    # Close file used for output
+    out_file.close()
