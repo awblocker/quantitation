@@ -28,6 +28,8 @@ documentation.
 '''
 
 TIMING_MSG = '''
+%s
+--------------------------------------------------------------------------------
 MCMC sampler used %f seconds for %d iterations.
 %f seconds per iteration.
 '''
@@ -84,7 +86,8 @@ def main(argv):
                                                        mapping_peptides, cfg)
         if timing:
             time_done = time.time()
-            print >> sys.stderr, TIMING_MSG % (cfg['settings']['n_iterations'],
+            print >> sys.stderr, TIMING_MSG % (cfg_path,
+                                               cfg['settings']['n_iterations'],
                                                time_done-time_start,
                                                (time_done-time_start) /
                                                cfg['settings']['n_iterations'])

@@ -36,7 +36,9 @@ documentation.
 '''
 
 TIMING_MSG = '''
-Combinging process used %f seconds.
+%s
+--------------------------------------------------------------------------------
+Combining process used %f seconds.
 '''
 
 def main(argv):
@@ -124,7 +126,7 @@ def main(argv):
         # Wrap-up timing, if requested
         if timing:
             time_done = time.time()
-            print >> sys.stderr, TIMING_MSG % (time_done-time_start,)
+            print >> sys.stderr, TIMING_MSG % (cfg_path, time_done-time_start)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

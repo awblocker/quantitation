@@ -33,6 +33,8 @@ documentation.
 '''
 
 TIMING_MSG = '''
+%s
+--------------------------------------------------------------------------------
 MCMC sampler used %f seconds for %d iterations.
 %f seconds per iteration.
 %d processes used via MPI.
@@ -85,7 +87,8 @@ def main(argv):
 
         if timing and comm.Get_rank() == 0:
             time_done = time.time()
-            print >> sys.stderr, TIMING_MSG % (cfg['settings']['n_iterations'],
+            print >> sys.stderr, TIMING_MSG % (cfg_path,
+                                               cfg['settings']['n_iterations'],
                                                time_done-time_start,
                                                (time_done-time_start) /
                                                cfg['settings']['n_iterations'],
