@@ -208,9 +208,6 @@ def master(comm, n_proc, data, cfg):
             merging worker-level results.
 
     '''
-    # Determine number of proteins
-    n_proteins = np.size(data['mapping_peptides'])
-
     # Determine number of workers
     n_workers = comm.Get_size() - 1
     if n_workers < 1:
