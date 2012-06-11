@@ -90,8 +90,10 @@ def main(argv):
                                                cfg['settings']['n_iterations'])
 
         # Save output
-        path_results = cfg['settings']['path_results_combined']
+        path_results = cfg['output']['path_results_combined']
+        compress = cfg['output']['compress_pickle']
         quantitation.write_to_pickle(fname=path_results,
+                                     compress=compress,
                                      draws=draws,
                                      accept_stats=accept_stats)
 
