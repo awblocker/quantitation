@@ -1412,23 +1412,17 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
             2d array of shape (dim_param, dim_param) containing approximate
             posterior precision for parameter.
     '''
-    # Determine number of workers
-    n_workers = comm.Get_size()-1
-
-    # Using simply 1d format to send point estimates and informations together.
-    # Define dim_info as dim_param*(dim_param+1)/2:
+    # Using simply 1d format to send point estimates and precisions together.
+    # Define dim_prec as dim_param*(dim_param+1)/2:
     #   - 0:dim_param : point estimate
-    #   - dim_param:(dim_info + dim_param) : lower-triangular portion of info
-    dim_info = (dim_param*(dim_param+1))/2
-    buf = np.zeros(dim_param + dim_info, dtype=np.float)
-    approx = np.empty(dim_param + dim_info, dtype=np.float)
+    #   - dim_param:(dim_prec + dim_param) : lower-triangular portion of info
+    dim_prec = (dim_param*(dim_param+1))/2
+    buf = np.zeros(dim_param + dim_prec, dtype=np.float)
+    approx = np.empty(dim_param + dim_prec, dtype=np.float)
 
-    # Compute sum of all point estimates and informations
+    # Compute sum of all point estimates and precisions
     comm.Reduce([buf, MPI.DOUBLE], [approx, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
-
-    # Convert sum to average
-    approx /= n_workers
 
     # Extract precision matrix
     prec = np.empty((dim_param, dim_param))
@@ -1559,6 +1553,16 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     # workers.
     theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
                                                    MPIROOT=MPIROOT)
+    
+    # Reduce precision to account for duplication of prior
+    n_workers = comm.Get_size() - 1
+    prec -= (n_workers-1)*info_posterior_gamma(shape=np.exp(theta_hat[0]),
+                                               rate=np.exp(theta_hat[1]),
+                                               x=np.empty(0),
+                                               prior_shape=prior_shape,
+                                               prior_rate=prior_rate,
+                                               prior_mean_log=prior_mean_log,
+                                               prior_prec_log=prior_prec_log)
 
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
@@ -1722,6 +1726,16 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     # workers.
     theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
                                                    MPIROOT=MPIROOT)
+    
+    # Reduce precision to account for duplication of prior
+    n_workers = comm.Get_size() - 1
+    prec -= (n_workers-1)*info_posterior_nbinom(r=np.exp(theta_hat[0]),
+                                                p=1./(1.+np.exp(-theta_hat[1])),
+                                                x=np.empty(0),
+                                                prior_a=prior_a,
+                                                prior_b=prior_b,
+                                                prior_mean_log=prior_mean_log,
+                                                prior_prec_log=prior_prec_log)
 
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
