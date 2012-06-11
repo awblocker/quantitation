@@ -4,6 +4,9 @@
 import sys
 import getopt
 import time
+import bz2
+import gzip
+import contextlib
 
 import yaml
 import numpy as np
