@@ -1421,7 +1421,7 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     approx = np.empty(dim_param + dim_info, dtype=np.float)
 
     # Compute sum of all point estimates and informations
-    comm.Reduce([buf, MPI.FLOAT], [approx, MPI.FLOAT],
+    comm.Reduce([buf, MPI.DOUBLE], [approx, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
 
     # Convert sum to average
@@ -1500,12 +1500,12 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
     approx = np.r_[z_hat, info[np.tril_indices(2)]]
 
     # Combine with other approximations on master.
-    comm.Reduce([approx, MPI.FLOAT], None,
+    comm.Reduce([approx, MPI.DOUBLE], None,
                 op=MPI.SUM, root=MPIROOT)
 
     # Obtain proposed value of theta from master.
     theta_prop = np.empty(2)
-    comm.Bcast([theta_prop, MPI.FLOAT], root=MPIROOT)
+    comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
     shape_prop, rate_prop = np.exp(theta_prop)
 
     # Compute log-ratio of target densities, omitting prior.
@@ -1518,7 +1518,7 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
                                      rate=rate_prev, log=True))
 
     # Reduce log-target ratio for MH step on master.
-    comm.Reduce([np.array(log_target_ratio), MPI.FLOAT], None,
+    comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
                  op=MPI.SUM, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
@@ -1573,13 +1573,13 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     z_prev      = np.dot(U, theta_prev - theta_hat)
 
     # Broadcast theta_prop to workers
-    comm.Bcast([theta_prop, MPI.FLOAT], root=MPIROOT)
+    comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
 
     # Compute log-ratio of target densities.
     # Start by obtaining likelihood component from workers.
     log_target_ratio = np.array(0.)
     buf = np.array(0.)
-    comm.Reduce([buf, MPI.FLOAT], [log_target_ratio, MPI.FLOAT],
+    comm.Reduce([buf, MPI.DOUBLE], [log_target_ratio, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
 
     # Add log-prior ratio
@@ -1665,12 +1665,12 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
     approx = np.r_[z_hat, info[np.tril_indices(2)]]
 
     # Combine with other approximations on master.
-    comm.Reduce([approx, MPI.FLOAT], None,
+    comm.Reduce([approx, MPI.DOUBLE], None,
                 op=MPI.SUM, root=MPIROOT)
 
     # Obtain proposed value of theta from master.
     theta_prop = np.empty(2)
-    comm.Bcast([theta_prop, MPI.FLOAT], root=MPIROOT)
+    comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
     r_prop, p_prop = np.exp(theta_prop)
     p_prop = p_prop / (1. + p_prop)
 
@@ -1682,7 +1682,7 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                               dnbinom(x, r=r_prev, p=p_prev, log=True))
 
     # Reduce log-target ratio for MH step on master.
-    comm.Reduce([np.array(log_target_ratio), MPI.FLOAT], None,
+    comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
                  op=MPI.SUM, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
@@ -1738,13 +1738,13 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     z_prev      = np.dot(U, theta_prev - theta_hat)
 
     # Broadcast theta_prop to workers
-    comm.Bcast([theta_prop, MPI.FLOAT], root=MPIROOT)
+    comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
 
     # Compute log-ratio of target densities.
     # Start by obtaining likelihood component from workers.
     log_target_ratio = np.array(0.)
     buf = np.array(0.)
-    comm.Reduce([buf, MPI.FLOAT], [log_target_ratio, MPI.FLOAT],
+    comm.Reduce([buf, MPI.DOUBLE], [log_target_ratio, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
 
     if prior_prec_log > 0:
@@ -1798,12 +1798,12 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
     approx = np.r_[z_hat, I[np.tril_indices(2)]]
 
     # Combine with other approximations on master.
-    comm.Reduce([approx, MPI.FLOAT], None,
+    comm.Reduce([approx, MPI.DOUBLE], None,
                 op=MPI.SUM, root=MPIROOT)
 
     # Obtain proposed value of coefficients from master.
     b_prop = np.empty(p)
-    comm.Bcast([b_prop, MPI.FLOAT], root=MPIROOT)
+    comm.Bcast([b_prop, MPI.DOUBLE], root=MPIROOT)
 
     # Compute proposed and previous means
     eta_prop = np.dot(X, b_prop)
@@ -1817,7 +1817,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
                               family.loglik(y=y, mu=mu_prev, w=w))
 
     # Reduce log-target ratio for MH step on master.
-    comm.Reduce([np.array(log_target_ratio), MPI.FLOAT], None,
+    comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
                  op=MPI.SUM, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
@@ -1862,13 +1862,13 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=3.):
     z_prev = np.dot(U, b_prev - b_hat)
 
     # Broadcast b_prop to workers
-    comm.Bcast([b_prop, MPI.FLOAT], root=MPIROOT)
+    comm.Bcast([b_prop, MPI.DOUBLE], root=MPIROOT)
 
     # Compute log-ratio of target densities.
     # Start by obtaining likelihood component from workers.
     log_target_ratio = np.array(0.)
     buf = np.array(0.)
-    comm.Reduce([buf, MPI.FLOAT], [log_target_ratio, MPI.FLOAT],
+    comm.Reduce([buf, MPI.DOUBLE], [log_target_ratio, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
 
     # Compute log-ratio of proposal densities. This is very easy with the

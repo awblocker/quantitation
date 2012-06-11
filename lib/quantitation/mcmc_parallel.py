@@ -271,17 +271,17 @@ def master(comm, n_proc, data, cfg):
                           p_rnd_cen[0]]
 
     for worker in xrange(1, n_workers+1):
-        comm.Send([0, MPI.INT], dest=worker, tag=TAGS['SYNC'])
+        comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
     comm.Bcast(params_shared, root=MPIROOT)
 
     # Start initialization on workers
     for worker in xrange(1, n_workers+1):
-        comm.Send([0, MPI.INT], dest=worker, tag=TAGS['INIT'])
+        comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['INIT'])
 
     # Initialize r and lmbda by averaging MAP estimators from workers
     r_lmbda_init = np.zeros(2)
     buf = np.zeros(2)
-    comm.Reduce([buf, MPI.FLOAT], [r_lmbda_init, MPI.FLOAT],
+    comm.Reduce([buf, MPI.DOUBLE], [r_lmbda_init, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
     r[0], lmbda[0] = r_lmbda_init / n_workers
 
@@ -303,7 +303,7 @@ def master(comm, n_proc, data, cfg):
                               p_rnd_cen[t-1]]
 
         for worker in xrange(1, n_workers+1):
-            comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
+            comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['SYNC'])
         comm.Bcast(params_shared, root=MPIROOT)
 
 
@@ -539,13 +539,14 @@ def worker(comm, rank, n_proc, data, cfg):
             # terrible. Note that this ignores the +1 location shift in the
             # actual n_states distribution.
             kwargs = {'x' : n_obs_states_per_peptide[n_obs_states_per_peptide>0]
-                            -1}
+                            - 1,
+                      'transform' : True}
             kwargs.update(cfg['priors']['n_states_dist'])
             r, lmbda = lib.map_estimator_nbinom(**kwargs)
 
             # Combine local estimates at master for initialization.
             # Values synchronize at first iteration during SYNC task.
-            comm.Reduce([np.array([r, lmbda]), MPI.FLOAT], None,
+            comm.Reduce([np.array([r, lmbda]), MPI.DOUBLE], None,
                          op=MPI.SUM, root=MPIROOT)
         elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
