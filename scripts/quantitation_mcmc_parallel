@@ -1,0 +1,96 @@
+#!python
+
+# Load libraries
+import sys
+import getopt
+import time
+
+import yaml
+import numpy as np
+
+import quantitation
+
+# Define constants
+
+HELP = '''
+Usage: quantitation_mcmc_serial [options] CONFIG [CONFIG]
+
+Runs parallel MCMC sampler for absolute quantitation from LC/MSMS data. This
+script is designed to be called directly from mpiexec with the desired number of
+processors allocated via -n. It uses MPI_COMM_WORLD and has no dynamic process
+management of its own.
+
+Writes MCMC output to paths specificed in each CONFIG. Output consists of one
+file with master-process output and n_workers files with worker process output
+per CONFIG file.
+
+Options:
+  -h, --help            Show this help message and exit
+  --time                Time MCMC sampler; writes timing information to stderr
+
+Details of the required format for the YAML CONFIG files can be found it further
+documentation.
+'''
+
+TIMING_MSG = '''
+MCMC sampler used %f seconds for %d iterations.
+%f seconds per iteration.
+%d processes used via MPI.
+'''
+
+def main(argv):
+    '''
+    Main function for option-parsing and startup.
+    
+    Takes sys.argv[1:] as input.
+    '''
+    # Set default values for options
+    timing = False
+    
+    # Parse arguments and options
+    opts, args = getopt.getopt(argv, "h",
+                               ["help"])
+    for option, value in opts:
+        if option in ('-h', "--help"):
+            print >> sys.stderr, HELP
+            sys.exit(2)
+        elif option=='--time':
+            timing = True
+        else:
+            print >> sys.stderr, "Error -- unknown option %s" % option
+            sys.exit(1)
+
+    if len(args) > 0:
+        cfg_paths = args
+    else:
+        print >> sys.stderr, "Error -- need path to YAML configuration"
+        sys.exit(1)
+
+    # Start MPI communications
+    comm = MPI.COMM_WORLD
+    
+    # Iterate over configuration files
+    for cfg_path in cfg_paths:
+        # Parse YAML configuration
+        cfg_file = open(cfg_path, 'rb')
+        cfg = yaml.load(cfg_file)
+        cfg_file.close()
+        
+        # Run MCMC sampler
+        if timing and comm.Get_rank() == 0:
+            time_start = time.time()
+
+        # Note that all file IO is handled within this function
+        quantitation.mcmc_parallel.run(cfg, comm=comm)
+
+        if timing and comm.Get_rank() == 0:
+            time_done = time.time()
+            print >> sys.stderr, TIMING_MSG % (cfg['settings']['n_iterations'],
+                                               time_done-time_start,
+                                               (time_done-time_start) /
+                                               cfg['settings']['n_iterations'],
+                                               comm.Get_size())
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+

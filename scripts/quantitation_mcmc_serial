@@ -1,0 +1,100 @@
+#!python
+
+# Load libraries
+import sys
+import getopt
+import time
+
+import yaml
+import numpy as np
+
+import quantitation
+
+# Define constants
+
+HELP = '''
+Usage: quantitation_mcmc_serial [options] CONFIG [CONFIG]
+
+Runs serial MCMC sampler for absolute quantitation from LC/MSMS data.
+
+Writes MCMC output to path specificed in each CONFIG file for combined results.
+
+Options:
+  -h, --help            Show this help message and exit
+  --time                Time MCMC sampler; writes timing information to stderr
+
+Details of the required format for the YAML CONFIG files can be found it further
+documentation.
+'''
+
+TIMING_MSG = '''
+MCMC sampler used %f seconds for %d iterations.
+%f seconds per iteration.
+'''
+
+def main(argv):
+    '''
+    Main function for option-parsing and startup.
+    
+    Takes sys.argv[1:] as input.
+    '''
+    # Set default values for options
+    timing = False
+    
+    # Parse arguments and options
+    opts, args = getopt.getopt(argv, "h",
+                               ["help"])
+    for option, value in opts:
+        if option in ('-h', "--help"):
+            print >> sys.stderr, HELP
+            sys.exit(2)
+        elif option=='--time':
+            timing = True
+        else:
+            print >> sys.stderr, "Error -- unknown option %s" % option
+            sys.exit(1)
+
+    if len(args) > 0:
+        cfg_paths = args
+    else:
+        print >> sys.stderr, "Error -- need path to YAML configuration"
+        sys.exit(1)
+    
+    # Iterate over configuration files
+    for cfg_path in cfg_paths:
+        # Parse YAML configuration
+        cfg_file = open(cfg_path, 'rb')
+        cfg = yaml.load(cfg_file)
+        cfg_file.close()
+        
+        # Load data
+        mapping_peptides = np.loadtxt(cfg['data']['path_mapping_peptides'],
+                                      dtype=np.int)
+        data_states = np.loadtxt(cfg['data']['path_data_state'],
+                                 dtype=[('peptide', np.int),
+                                        ('intensity', np.float)],
+                                 unpack=True)
+        mapping_states_obs, intensities_obs = data_states
+
+        # Run MCMC sampler
+        if timing:
+            time_start = time.time()
+        draws, accept_stats = quantitation.mcmc_serial(intensities_obs,
+                                                       mapping_states_obs,
+                                                       mapping_peptides, cfg)
+        if timing:
+            time_done = time.time()
+            print >> sys.stderr, TIMING_MSG % (cfg['settings']['n_iterations'],
+                                               time_done-time_start,
+                                               (time_done-time_start) /
+                                               cfg['settings']['n_iterations'])
+
+        # Save output
+        path_results = cfg['settings']['path_results_combined']
+        quantitation.write_to_pickle(fname=path_results,
+                                     draws=draws,
+                                     accept_stats=accept_stats)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+
