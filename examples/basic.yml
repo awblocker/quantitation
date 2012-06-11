@@ -66,10 +66,10 @@ init:
     
 # Section for algorithmic settings for MCMC
 settings:
-    n_iterations: 10000
+    n_iterations: 1000
     propDf: 3.
     verbose: 1
-    verbose_interval: 500
+    verbose_interval: 50
     n_strata: 10
     seed_load_data: 0
 
