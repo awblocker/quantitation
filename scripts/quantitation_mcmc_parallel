@@ -10,6 +10,7 @@ import numpy as np
 from mpi4py import MPI
 
 import quantitation
+import quantitation.mcmc_parallel
 
 # Define constants
 
