@@ -13,7 +13,7 @@ import quantitation
 # Define constants
 
 HELP = '''
-Usage: quantitation_mcmc_serial [options] CONFIG [CONFIG]
+Usage: quantitation_mcmc_parallel [options] CONFIG [CONFIG]
 
 Runs parallel MCMC sampler for absolute quantitation from LC/MSMS data. This
 script is designed to be called directly from mpiexec with the desired number of
