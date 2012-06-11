@@ -1,8 +1,6 @@
 import sys
-import time
 import bz2
 import gzip
-import contextlib
 import cPickle
 
 import numpy as np
@@ -44,7 +42,7 @@ def load_data(cfg, rank=None, n_workers=None):
         - cfg : dictionary
             Dictionary containing (at least) data section with paths
             to template, null, read data, and regions. It should also have
-            a sampling_seed key in its setting section if rank > 0.
+            a sampling_seed key in its settings section if rank > 0.
         - rank : integer
             Rank of process to load data into.
         - n_workers : integer
@@ -76,6 +74,10 @@ def load_data(cfg, rank=None, n_workers=None):
         - proteins_worker : array_like, 1 dimension, nonnegative ints
             A 1d integer array of length n_proteins containing the indices (in
             the original dataset) of the proteins assigned to the given worker.
+            Only provided if rank > 0.
+        - peptides_worker : array_like, 1 dimension, nonnegative ints
+            A 1d integer array of length n_peptides containing the indices (in
+            the original dataset) of the peptides assigned to the given worker.
             Only provided if rank > 0.
     '''
     # Load peptide to protein mapping
@@ -175,7 +177,8 @@ def load_data(cfg, rank=None, n_workers=None):
     data = {'intensities_obs' : intensities_obs_worker,
             'mapping_states_obs' : mapping_states_obs_worker,
             'mapping_peptides' : mapping_peptides_worker,
-            'proteins_worker' : unique_proteins}
+            'proteins_worker' : unique_proteins,
+            'peptides_worker' : select_peptides}
     return data
 
 
@@ -191,14 +194,16 @@ def master(comm, data, cfg):
         - data : dictionary
             Data as output from load_data with rank==0.
         - cfg : dictionary
-            Dictionary containing (at least) prior and estimation_params
-            sections with appropriate entries.
+            Configuration dictionary containing priors, settings, and paths for
+            analysis. Its format is specified in detail in separate 
+            documentation.
 
     Returns
     -------
         - draws : dictionary
             1- and 2-dimensional ndarrays containing the posterior samples for
-            each parameter.
+            each shared parameter. Protein- and peptide-specific parameters are
+            handled by each worker.
         - accept_stats : dictionary
             Dictionary containing number of acceptances for each MH step.
         - mapping_peptides : integer ndarray
@@ -408,12 +413,24 @@ def worker(comm, rank, data, cfg):
         - init : dictionary
             Initial parameter values as output from initialize.
         - cfg : dictionary
-            Dictionary containing (at least) prior and estimation_params
-            sections with appropriate entries.
+            Configuration dictionary containing priors, settings, and paths for
+            analysis. Its format is specified in detail in separate 
+            documentation.
 
     Returns
     -------
-        None.
+        - draws : dictionary
+            1- and 2-dimensional ndarrays containing the posterior samples for
+            each protein- and ppeptide-specific parameter. Shared parameters are
+            handled by the master process.
+        - mapping_peptides : integer ndarray
+            Worker-specific peptide to protein mapping provided in data.
+        - proteins_worker : array_like, 1 dimension, nonnegative ints
+            A 1d integer array of length n_proteins containing the indices (in
+            the original dataset) of the proteins assigned to the given worker.
+        - peptides_worker : array_like, 1 dimension, nonnegative ints
+            A 1d integer array of length n_peptides containing the indices (in
+            the original dataset) of the peptides assigned to the given worker.
     '''
     # Create references to relevant data entries in local namespace
     mapping_peptides    = data['mapping_peptides']
@@ -704,7 +721,8 @@ def worker(comm, rank, data, cfg):
              'tausq' : tausq_draws,
              'n_cen_states_per_peptide':n_cen_states_per_peptide_draws,
              }
-    return draws, data['mapping_peptides'], data['proteins_worker']
+    return (draws, data['mapping_peptides'],
+            data['proteins_worker'], data['peptides_worker'])
 
 
 def run(cfg, comm=None):
@@ -714,8 +732,9 @@ def run(cfg, comm=None):
     Parameters
     ----------
         - cfg : dictionary
-            Dictionary containing (at least) prior and estimation_params
-            sections with appropriate entries.
+            Configuration dictionary containing priors, settings, and paths for
+            analysis. Its format is specified in detail in separate 
+            documentation.
         - comm : mpi4py.MPI.COMM
             Initialized MPI communicator. If None, it will be set to
             MPI.COMM_WORLD.
@@ -747,8 +766,9 @@ def run(cfg, comm=None):
                         accept_stats=accept_stats,
                         mapping_peptides=mapping_peptides)
     else:
-        draws, mapping_peptides, proteins_worker = worker(comm=comm, rank=rank,
-                                                          data=data, cfg=cfg)
+        result_worker = worker(comm=comm, rank=rank, data=data, cfg=cfg)
+        draws, mapping_peptides = result_worker[:2]
+        proteins_worker, peptides_worker = result_worker[2:]
 
         # Construct path for worker-specific results
         path_worker = cfg['output']['pattern_results_worker'] % rank
@@ -758,7 +778,8 @@ def run(cfg, comm=None):
                         compress=cfg['output']['compress_pickle'],
                         draws=draws,
                         mapping_peptides=mapping_peptides,
-                        proteins_worker=proteins_worker)
+                        proteins_worker=proteins_worker,
+                        peptides_worker=peptides_worker)
 
 def write_to_pickle(fname, compress='bz2', **kwargs):
     '''
@@ -790,3 +811,85 @@ def write_to_pickle(fname, compress='bz2', **kwargs):
 
     # Close file used for output
     out_file.close()
+
+def combine_results(result_master, list_results_workers, cfg):
+    '''
+    Combine MCMC results from master and workers for subsequent analysis.
+    
+    Parameters
+    ----------
+        - result_master : dictionary
+            Dictionary containing results output by master(). This should
+            contain draws, accept_stats, and mapping_peptides in their 
+            appropriate keys.
+        - list_results_workers : list of dictionaries
+            List containing dictionaries of results output by worker(). Each
+            dictionary should contain draws, mapping_peptides, proteins_worker,
+            and peptides_worker in their appropriate keys.
+            len(list_results_workers) should equal n_workers.
+        - cfg : dictionary
+            Configuration dictionary used for MCMC sampling.
+    
+    Returns
+    -------
+        - draws : dictionary
+            1- and 2-dimensional ndarrays containing the posterior samples for
+            each parameter. Includes shared, protein-specific, and 
+            peptide-specific parameters.
+        - accept_stats : dictionary
+            Dictionary containing number of acceptances for each MH step.
+        - mapping_peptides : integer ndarray
+            Peptide to protein mapping provided in data. This is useful for
+            merging worker-level results.
+            
+    '''
+    # Reference master-specific output in local scope
+    draws_master        = result_master['draws']
+    accept_stats        = result_master['accept_stats']
+    mapping_peptides    = result_master['mapping_peptides']
+    
+    # Extract dimensions
+    n_iterations    = cfg['settings']['n_iterations']
+    n_proteins      = np.max(mapping_peptides)+1
+    n_peptides      = np.size(mapping_peptides)
+    
+    # Construct combined arrays of protein-specific draws (mu, sigmasq, & tausq)
+    mu          = np.empty((n_iterations, n_proteins))
+    sigmasq     = np.empty((n_iterations, n_proteins))
+    tausq       = np.empty((n_iterations, n_proteins))
+    
+    for result_worker in list_results_workers:
+        proteins_worker = result_worker['proteins_worker']
+        
+        mu[:,proteins_worker]       = result_worker['draws']['mu']
+        sigmasq[:,proteins_worker]  = result_worker['draws']['sigmasq']
+        tausq[:,proteins_worker]    = result_worker['draws']['tausq']
+    
+    # Construct combined arrays of peptide-specific draws (gamma &
+    # n_cen_states_per_peptide)
+    gamma = np.empty((n_iterations, n_peptides))
+    n_cen_states_per_peptide = np.empty((n_iterations, n_peptides))
+    
+    for result_worker in list_results_workers:
+        peptides_worker = result_worker['peptides_worker']
+        
+        gamma[:,peptides_worker]    = result_worker['draws']['gamma']
+        n_cen_states_per_peptide[:,peptides_worker] = result_worker['draws'][
+                                                     'n_cen_states_per_peptide']
+    
+    # Construct dictionary of combined draws
+    draws = {}
+    
+    # Master-specific draws
+    draws.update(draws_master)
+    
+    # Protein-specific draws
+    draws['mu']         = mu
+    draws['sigmasq']    = sigmasq
+    draws['tausq']      = tausq
+    
+    # Peptide-specific draws
+    draws['gamma'] = gamma
+    draws['n_cen_states_per_peptide'] = n_cen_states_per_peptide
+    
+    return draws, accept_stats, mapping_peptides
