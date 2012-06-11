@@ -45,7 +45,7 @@ def main(argv):
     
     # Parse arguments and options
     opts, args = getopt.getopt(argv, "h",
-                               ["help"])
+                               ["help", "time"])
     for option, value in opts:
         if option in ('-h', "--help"):
             print >> sys.stderr, HELP
