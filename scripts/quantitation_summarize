@@ -20,7 +20,7 @@ Usage: quantitation_summarize [options] CONFIG [CONFIG]
 
 Summarize results from parallel MCMC sampler for absolute quantitation from
 LC/MSMS data. This should be run only after obtaining combined MCMC output. This
-required running quantitation_combine_results if quantitation_mcmc_parallel was
+requires running quantitation_combine_results if quantitation_mcmc_parallel was
 used to perform sampling.
 
 Reads MCMC output from the path specified in each CONFIG for combined output.
