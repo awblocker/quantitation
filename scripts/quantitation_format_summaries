@@ -1,0 +1,187 @@
+#!python
+
+# Load libraries
+import sys
+import getopt
+import time
+import cPickle
+import bz2
+import gzip
+
+import yaml
+import numpy as np
+
+from quantitation import lib
+
+# Define constants
+
+HELP = '''
+Usage: quantitation_format_summaries [options] CONFIG [CONFIG]
+
+Format summaries of draws from parallel MCMC sampler for absolute quantitation
+from LC/MSMS data. This should be run only after summarizing MCMC output. The
+resulting output is in text format and contains the standard protein and peptide
+names.
+
+Reads MCMC summaries from the path specified in each CONFIG for summarized
+output.
+
+Writes MCMC summaries for proteins- and peptide-level variables to paths
+specified in each CONFIG file for summarized text results.
+
+Options:
+  -h, --help            Show this help message and exit
+  --time                Time formatting process; writes timing information to
+                        stderr
+
+Details of the required format for the YAML CONFIG files can be found it further
+documentation.
+'''
+
+TIMING_MSG = '''
+%s
+--------------------------------------------------------------------------------
+Formatting process used %f seconds.
+'''
+
+def main(argv):
+    '''
+    Main function for option-parsing and startup.
+    
+    Takes sys.argv[1:] as input.
+    '''
+    # Set default values for options
+    timing = False
+    
+    # Parse arguments and options
+    opts, args = getopt.getopt(argv, "h",
+                               ["help", "time"])
+    for option, value in opts:
+        if option in ('-h', "--help"):
+            print >> sys.stderr, HELP
+            sys.exit(2)
+        elif option=='--time':
+            timing = True
+        else:
+            print >> sys.stderr, "Error -- unknown option %s" % option
+            sys.exit(1)
+
+    if len(args) > 0:
+        cfg_paths = args
+    else:
+        print >> sys.stderr, "Error -- need path to YAML configuration"
+        sys.exit(1)
+
+    # Iterate over configuration files
+    for cfg_path in cfg_paths:
+        # Parse YAML configuration
+        cfg_file = open(cfg_path, 'rb')
+        cfg = yaml.load(cfg_file)
+        cfg_file.close()
+
+        # Determine type of compression used
+        compress = cfg['output']['compress_pickle']
+
+        # Check for validity of compression
+        if compress not in (None, 'bz2', 'gz'):
+            raise ValueError('Invalid value for compress.')
+
+        # Prepare to open files, depending up compression requested
+        if compress is None:
+            fload = open
+        elif compress == 'bz2':
+            fload = bz2.BZ2File
+        elif compress == 'gz':
+            fload = gzip.GzipFile
+        
+        # Start timing, if requested
+        if timing:
+            time_start = time.time()
+
+        # Load combined results
+        path_summaries = cfg['output']['path_summaries']
+        with fload(path_summaries, 'rb') as f:
+            summaries = cPickle.load(f)
+        
+        # Load protein and peptide names
+        names_proteins = []
+        with open(cfg['data']['path_names_proteins'], 'rb') as f:
+            for line in f:
+                names_proteins.append(line.strip())
+
+        names_proteins = np.array(names_proteins)
+        
+        names_peptides = []
+        with open(cfg['data']['path_names_peptides'], 'rb') as f:
+            for line in f:
+                names_peptides.append(line.strip())
+
+        names_peptides = np.array(names_peptides)
+
+        # Build array of protein-specific summaries.
+        # Including posterior means, standard deviations, and effective sample
+        # sizes.
+        # Sequence is (mu, sigmasq, tausq) x (means, stderrors,
+        # effective_sample_sizes)
+        names_summaries_proteins = [var + '_' + summary for var in
+                                    ('mu', 'sigmasq', 'tausq')
+                                    for summary in
+                                    ('mean', 'stdev', 'n_eff')]
+        names_summaries_proteins.insert(0, 'protein')
+        summaries_proteins = [names_proteins,
+                              summaries['means']['mu'],
+                              summaries['stderror']['mu'],
+                              summaries['effective_sample_sizes']['mu'],
+                              summaries['means']['sigmasq'],
+                              summaries['stderror']['sigmasq'],
+                              summaries['effective_sample_sizes']['sigmasq'],
+                              summaries['means']['tausq'],
+                              summaries['stderror']['tausq'],
+                              summaries['effective_sample_sizes']['tausq'],]
+        summaries_proteins = np.rec.fromarrays(summaries_proteins,
+                                               names=names_summaries_proteins)
+
+        # Write protein-specific summaries to text file
+        path_protein_summaries_txt = cfg['output']['path_protein_summaries_txt']
+        lib.write_recarray_to_file(fname=path_protein_summaries_txt,
+                                   data=summaries_proteins,
+                                   header=True, quote=False,
+                                   sep=cfg['data']['sep_input'])
+
+        # Build array of peptide-specific summaries.
+        # Including posterior means, standard deviations, and effective sample
+        # sizes.
+        # Sequence is (gamma, n_cen_states_per_peptide) x (means, stderrors,
+        # effective_sample_sizes)
+        names_summaries_peptides = [var + '_' + summary for var in
+                                    ('gamma', 'n_cen_states_per_peptide')
+                                    for summary in
+                                    ('mean', 'stdev', 'n_eff')]
+        names_summaries_peptides.insert(0, 'protein')
+        names_summaries_peptides.insert(1, 'peptide')
+        summaries_peptides = [names_proteins[summaries['mapping_peptides']],
+                              names_peptides,
+                              summaries['means']['gamma'],
+                              summaries['stderror']['gamma'],
+                              summaries['effective_sample_sizes']['gamma'],
+                              summaries['means']['n_cen_states_per_peptide'],
+                              summaries['stderror']['n_cen_states_per_peptide'],
+                              summaries['effective_sample_sizes']['n_cen_states_per_peptide'],]
+        summaries_peptides = np.rec.fromarrays(summaries_peptides,
+                                               names=names_summaries_peptides)
+
+        # Write peptide-specific summaries to text file
+        path_peptide_summaries_txt = cfg['output']['path_peptide_summaries_txt']
+        lib.write_recarray_to_file(fname=path_peptide_summaries_txt,
+                                   data=summaries_peptides,
+                                   header=True, quote=False,
+                                   sep=cfg['data']['sep_input'])
+
+        # Wrap-up timing, if requested
+        if timing:
+            time_done = time.time()
+            print >> sys.stderr, TIMING_MSG % (cfg_path, time_done-time_start)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+

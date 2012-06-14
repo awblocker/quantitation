@@ -12,7 +12,8 @@ REQUIRES = ['numpy(>=1.6)','scipy(>=0.9)', 'yaml', 'mpi4py']
 
 PACKAGE_DIR = {'': 'lib'}
 PACKAGES = ['quantitation','quantitation.glm']
-SCRIPTS = ('mcmc_serial', 'mcmc_parallel', 'combine_results', 'summarize')
+SCRIPTS = ('mcmc_serial', 'mcmc_parallel', 'combine_results', 'summarize',
+           'format_summaries')
 SCRIPTS = ['scripts/quantitation_' + script for script in SCRIPTS]
 
 setup(name=NAME,
