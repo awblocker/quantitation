@@ -103,6 +103,12 @@ def main(argv):
             results = cPickle.load(f)
 
         draws = results['draws']
+        
+        if (cfg['settings']['burn_in'] is not None and
+            cfg['settings']['burn_in']>0):
+            # Eliminate burn-in, if requested
+            for k in draws.keys():
+                draws[k] = draws[k][cfg['settings']['burn_in']:]
 
         # Summarize results
         effective_sample_sizes = quantitation.effective_sample_sizes(**draws)
