@@ -2,6 +2,8 @@
 data:
     path_data_state: data/data_state_sim_nProteins=1100.txt
     path_mapping_peptides: data/mapping_peptides_sim_nProteins=1100.txt
+    path_names_proteins: data/names_proteins_sim_nProteins=1100.txt
+    path_names_peptides: data/names_peptides_sim_nProteins=1100.txt
     sep_input: " "
 
 # Section for output information for MCMC
@@ -16,6 +18,10 @@ output:
     path_results_combined: "test/draws_sim-big.pickle.bz2"
     # Path for posterior summaries and diagnostics
     path_summaries: "test/summaries_sim-big.pickle.bz2"
+    # Path for protein-level text results
+    path_protein_summaries_txt: test/protein_summaries_sim-big.txt
+    # Path for peptide-level text results
+    path_peptide_summaries_txt: test/peptide_summaries_sim-big.txt
 
 # Section for prior parameters
 priors:
