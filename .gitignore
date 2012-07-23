@@ -23,6 +23,8 @@ mcmcDraws
 mcmcDraws/*
 # vim sessions
 *.vim
+# Raw testing files
+test/
 
 # Scratch work
 scratch/
