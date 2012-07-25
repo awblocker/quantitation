@@ -1446,7 +1446,8 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
                                     prior_mean_log=2.65,
                                     prior_prec_log=1./0.652**2,
                                     prior_shape=1., prior_rate=0.,
-                                    brent_scale=6., fallback_upper=10000.):
+                                    brent_scale=6., fallback_upper=10000.,
+                                    correct_prior=False):
     '''
     Worker side of Metropolis-Hastings step for variance hyperparameters given
     all other parameters.
@@ -1467,14 +1468,19 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
 
     Returns None.
     '''
+    # Correct / adjust prior for distributed approximation, if requested
+    adj = 1.
+    if correct_prior:
+        adj = comm.Get_size() - 1.
+
     # Compute posterior mode for shape and rate using profile log-posterior
     precisions = 1./variances
 
     shape_hat, rate_hat = map_estimator_gamma(x=precisions, log=True,
                                               prior_shape=prior_shape,
-                                              prior_rate=prior_rate,
+                                              prior_rate=prior_rate/adj,
                                               prior_mean_log=prior_mean_log,
-                                              prior_prec_log=prior_prec_log,
+                                              prior_prec_log=prior_prec_log/adj,
                                               brent_scale=brent_scale,
                                               fallback_upper=fallback_upper)
 
@@ -1485,9 +1491,9 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
     info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
                                 x=precisions, log=True,
                                 prior_shape=prior_shape,
-                                prior_rate=prior_rate,
+                                prior_rate=prior_rate/adj,
                                 prior_mean_log=prior_mean_log,
-                                prior_prec_log=prior_prec_log)
+                                prior_prec_log=prior_prec_log/adj)
 
     # Compute information-weighted point estimate
     theta_hat   = np.log(np.array([shape_hat, rate_hat]))
@@ -1554,16 +1560,6 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
                                                    MPIROOT=MPIROOT)
     
-    # Reduce precision to account for duplication of prior
-    n_workers = comm.Get_size() - 1
-    prec -= (n_workers-1)*info_posterior_gamma(shape=np.exp(theta_hat[0]),
-                                               rate=np.exp(theta_hat[1]),
-                                               x=np.empty(0),
-                                               prior_shape=prior_shape,
-                                               prior_rate=prior_rate,
-                                               prior_mean_log=prior_mean_log,
-                                               prior_prec_log=prior_prec_log)
-
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
     U = linalg.cholesky(prec, lower=False)
@@ -1626,7 +1622,8 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                                   prior_mean_log=2.65,
                                   prior_prec_log=1./0.652**2,
                                   prior_a=1., prior_b=1.,
-                                  brent_scale=6., fallback_upper=10000.):
+                                  brent_scale=6., fallback_upper=10000.,
+                                  correct_prior=False):
     '''
     Worker side of Metropolis-Hastings step for negative-binomial
     hyperparameters given all other parameters.
@@ -1646,11 +1643,16 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
 
     Returns None.
     '''
+    # Correct / adjust prior for distributed approximation, if requested
+    adj = 1.
+    if correct_prior:
+        adj = comm.Get_size() - 1.
+
     # Compute posterior mode for r and p using profile log-posterior
     r_hat, p_hat = map_estimator_nbinom(x=x, transform=True,
                                         prior_a=prior_a, prior_b=prior_b,
                                         prior_mean_log=prior_mean_log,
-                                        prior_prec_log=prior_prec_log,
+                                        prior_prec_log=prior_prec_log/adj,
                                         brent_scale=brent_scale,
                                         fallback_upper=fallback_upper)
 
@@ -1661,7 +1663,7 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
     info = info_posterior_nbinom(r=r_hat, p=p_hat, x=x, transform=True,
                                  prior_a=prior_a, prior_b=prior_b,
                                  prior_mean_log=prior_mean_log,
-                                 prior_prec_log=prior_prec_log)
+                                 prior_prec_log=prior_prec_log/adj)
 
     # Compute information-weighted point estimate
     theta_hat   = np.log(np.array([r_hat, p_hat]))
@@ -1727,16 +1729,6 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
                                                    MPIROOT=MPIROOT)
     
-    # Reduce precision to account for duplication of prior
-    n_workers = comm.Get_size() - 1
-    prec -= (n_workers-1)*info_posterior_nbinom(r=np.exp(theta_hat[0]),
-                                                p=1./(1.+np.exp(-theta_hat[1])),
-                                                x=np.empty(0),
-                                                prior_a=prior_a,
-                                                prior_b=prior_b,
-                                                prior_mean_log=prior_mean_log,
-                                                prior_prec_log=prior_prec_log)
-
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
     U = linalg.cholesky(prec, lower=False)
