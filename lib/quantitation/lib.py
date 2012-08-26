@@ -361,7 +361,8 @@ def info_profile_posterior_gamma(shape, x, log=False,
 
 def score_profile_posterior_nbinom(r, x, transform=False,
                                    prior_a=1., prior_b=1.,
-                                   prior_mean_log=0., prior_prec_log=0.):
+                                   prior_mean_log=0., prior_prec_log=0.,
+                                   prior_adj=1.):
     '''
     Profile posterior score for r (convolution) parameter of negative-binomial
     distribution.
@@ -371,18 +372,23 @@ def score_profile_posterior_nbinom(r, x, transform=False,
     Assumes a conditionally conjugate beta prior on p and an independent
     log-normal prior on r, each with the given parameters.
 
+    The entire log-prior is divided by prior_adj. This is useful for
+    constructing distributed approximations.
+
     Returns a float with the desired score.
     '''
     # Compute conditional posterior mode of p
     n = np.size(x)
-    A = np.mean(x) + (prior_a- 1.+transform)/n
-    B = r + (prior_b - 1.+transform)/n
+    A = np.mean(x) + ((prior_a - 1.)/prior_adj + transform)/n
+    B = r + ((prior_b - 1.)/prior_adj + transform)/n
     p_hat = A / (A + B)
 
     # Compute score for r
+    # Likelihood
     score = (n*np.log(1.-p_hat) + np.sum(special.polygamma(0, x+r))
              - n*special.polygamma(0,r))
-    score += -prior_prec_log*(np.log(r) - prior_mean_log)/r - 1./r
+    # Prior
+    score += (-prior_prec_log*(np.log(r) - prior_mean_log)/r - 1./r)/prior_adj
 
     # Handle log transformation of parameters via simple chain rule
     if transform:
@@ -398,7 +404,7 @@ def score_profile_posterior_nbinom(r, x, transform=False,
     return score
 
 def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
-                          prior_mean_log=0., prior_prec_log=0.):
+                          prior_mean_log=0., prior_prec_log=0., prior_adj=1.):
     '''
     Compute posterior information for r (convolution) and p parameters of
     negative-binomial distribution.
@@ -410,6 +416,9 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
     Assumes a conditionally conjugate beta prior on p and an independent
     log-normal prior on r, each with the given parameters.
 
+    The entire log-prior is divided by prior_adj. This is useful for
+    constructing distributed approximations.
+
     Returns a 2x2 np.ndarray for which the first {row,column} corresponds to r
     and the second corresponds to p.
     '''
@@ -419,9 +428,11 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
 
     # r, r
     info[0,0] = (n*special.polygamma(1, r) - np.sum(special.polygamma(1,x+r))
-                 - 1/r**2*(1+prior_prec_log*(np.log(r)-prior_mean_log-1)))
+                 - 1/r**2*(1+prior_prec_log*(np.log(r)-prior_mean_log-1)) /
+                 prior_adj)
     # p, p
-    info[1,1] = (n*r + prior_b - 1.)/(1.-p)**2 + (np.sum(x) + prior_a - 1.)/p**2
+    info[1,1] = ((n*r + (prior_b - 1.)/prior_adj)/(1.-p)**2 +
+                 (np.sum(x) + (prior_a - 1.)/prior_adj)/p**2)
     # r, p and p, r
     info[0,1] = info[1,0] = n/(1.-p)
 
@@ -434,10 +445,11 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = np.array([-n*np.log(1.-p) - np.sum(special.polygamma(0, x+r))
                          + n*special.polygamma(0,r)
-                         + prior_prec_log*(np.log(r)-prior_mean_log)/r + 1./r -
-                         transform*1./r,
-                         -(np.sum(x) + prior_a - 1.)/p +
-                         (n*r + prior_b - 1.)/(1.-p) - transform*1./p/(1.-p)])
+                         + (prior_prec_log*(np.log(r)-prior_mean_log)/r + 1./r -
+                         transform*1./r)/prior_adj,
+                         -(np.sum(x) + (prior_a - 1.)/prior_adj)/p +
+                         (n*r + (prior_b - 1.)/prior_adj)/(1.-p) -
+                         transform*1./p/(1.-p)])
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv   = np.array([r, p*(1.-p)])
@@ -702,7 +714,7 @@ def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
     return (shape_hat, rate_hat)
 
 def map_estimator_nbinom(x, prior_a=1., prior_b=1., transform=False,
-                         prior_mean_log=0., prior_prec_log=0.,
+                         prior_mean_log=0., prior_prec_log=0., prior_adj=1.,
                          brent_scale=6., fallback_upper=10000.):
     '''
     Maximum a posteriori estimator for r (convolution) parameter and p parameter
@@ -724,7 +736,8 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1., transform=False,
         upper = fallback_upper
 
     # Verify that score is negative at upper bound
-    args=(x, transform, prior_a, prior_b, prior_mean_log, prior_prec_log)
+    args=(x, transform, prior_a, prior_b, prior_mean_log, prior_prec_log,
+          prior_adj)
     while score_profile_posterior_nbinom(upper, *args) > 0:
         upper *= 2.
 
@@ -734,8 +747,8 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1., transform=False,
                             args=args)
 
     # Compute posterior mode of p
-    A = np.mean(x) + (prior_a- 1.+transform)/n
-    B = r_hat + (prior_b - 1.+transform)/n
+    A = np.mean(x) + ((prior_a - 1.)/prior_adj + transform)/n
+    B = r_hat + ((prior_b - 1.)/prior_adj + transform)/n
     p_hat = A / (A + B)
 
     return (r_hat, p_hat)
@@ -1623,7 +1636,7 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                                   prior_prec_log=1./0.652**2,
                                   prior_a=1., prior_b=1.,
                                   brent_scale=6., fallback_upper=10000.,
-                                  correct_prior=False):
+                                  correct_prior=True):
     '''
     Worker side of Metropolis-Hastings step for negative-binomial
     hyperparameters given all other parameters.
@@ -1652,7 +1665,8 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
     r_hat, p_hat = map_estimator_nbinom(x=x, transform=True,
                                         prior_a=prior_a, prior_b=prior_b,
                                         prior_mean_log=prior_mean_log,
-                                        prior_prec_log=prior_prec_log/adj,
+                                        prior_prec_log=prior_prec_log,
+                                        prior_adj=adj,
                                         brent_scale=brent_scale,
                                         fallback_upper=fallback_upper)
 
@@ -1663,7 +1677,7 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
     info = info_posterior_nbinom(r=r_hat, p=p_hat, x=x, transform=True,
                                  prior_a=prior_a, prior_b=prior_b,
                                  prior_mean_log=prior_mean_log,
-                                 prior_prec_log=prior_prec_log/adj)
+                                 prior_prec_log=prior_prec_log, prior_adj=adj)
 
     # Compute information-weighted point estimate
     theta_hat   = np.log(np.array([r_hat, p_hat]))
