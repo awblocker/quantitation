@@ -227,7 +227,8 @@ def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat,
 
 def score_profile_posterior_gamma(shape, x, log=False,
                                   prior_shape=1., prior_rate=0.,
-                                  prior_mean_log=0., prior_prec_log=0.):
+                                  prior_mean_log=0., prior_prec_log=0.,
+                                  prior_adj=1.):
     '''
     Profile posterior score for shape parameter of gamma distribution.
 
@@ -240,18 +241,19 @@ def score_profile_posterior_gamma(shape, x, log=False,
     '''
     # Compute conditional posterior mode of rate parameter
     n = np.size(x)
-    rate_hat = ((shape + (prior_shape-1.+log)/n) /
-                (np.mean(x) + prior_rate/n))
+    rate_hat = ((shape + (prior_shape - 1. + log) / n / prior_adj) /
+                (np.mean(x) + prior_rate / n / prior_adj))
 
     # Compute score for untransformed shape parameter
     score = (np.sum(np.log(x)) - n*special.polygamma(0, shape) +
              n*np.log(rate_hat) -
-             prior_prec_log*(np.log(shape)-prior_mean_log)/shape - 1./shape)
+             prior_prec_log*(np.log(shape)-prior_mean_log)/shape / prior_adj -
+             1. / shape / prior_adj)
 
     # Handle log transformation of parameters via simple chain rule
     if log:
         # Add Jacobian term
-        score += 1./shape
+        score += 1. / shape / prior_adj
 
         # Compute derivative of untransformed parameters wrt transformed ones
         deriv   = shape
@@ -263,7 +265,8 @@ def score_profile_posterior_gamma(shape, x, log=False,
 
 def info_posterior_gamma(shape, rate, x, log=False,
                          prior_shape=1., prior_rate=0.,
-                         prior_mean_log=0., prior_prec_log=0.):
+                         prior_mean_log=0., prior_prec_log=0.,
+                         prior_adj=1.):
     '''
     Compute posterior information for shape and rate parameters of gamma
     distribution.
@@ -284,25 +287,27 @@ def info_posterior_gamma(shape, rate, x, log=False,
 
     # shape, shape
     info[0,0] = (n*special.polygamma(1, shape) -
-                 1/shape**2*(1+prior_prec_log*(np.log(shape)-prior_mean_log-1)))
+                 1 / shape**2 * (1 + prior_prec_log *
+                                 (np.log(shape) - prior_mean_log - 1.))/
+                 prior_adj)
     # rate, rate
-    info[1,1] = (n*shape+prior_shape-1.)/rate**2
+    info[1,1] = (n*shape + (prior_shape-1.) / prior_adj) / rate**2
     # shape, rate and rate, shape
-    info[0,1] = info[1,0] = -n/rate
+    info[0,1] = info[1,0] = -n / rate
 
     # Handle log transformation of parameters via simple chain rule
     if log:
         # Add Jacobian terms
-        info[0,0] += 1./shape**2
-        info[1,1] += 1./rate**2
+        info[0,0] += 1. / shape**2 / prior_adj
+        info[1,1] += 1. / rate**2 / prior_adj
 
         # Compute gradient for log-likelihood wrt untransformed parameters
-        grad = np.array([-n*np.log(rate) + n*special.polygamma(0, shape) -
-                         np.sum(np.log(x)) +
-                         prior_prec_log*(np.log(shape)-prior_mean_log)/shape +
-                         1./shape - log*1./shape,
-                         -(n*shape+prior_shape-1.)/rate+np.sum(x)+prior_rate
-                         - log*1./rate])
+        grad = np.array([-n * np.log(rate) + n * special.polygamma(0, shape) -
+                         np.sum(np.log(x)) + prior_prec_log / prior_adj *
+                         (np.log(shape) - prior_mean_log) / shape + 1. / shape -
+                         log * 1. / shape,
+                         -(n * shape + (prior_shape - 1.) / prior_adj) / rate +
+                         np.sum(x) + prior_rate / prior_adj - log * 1. / rate])
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv   = np.array([shape, rate])
@@ -379,8 +384,8 @@ def score_profile_posterior_nbinom(r, x, transform=False,
     '''
     # Compute conditional posterior mode of p
     n = np.size(x)
-    A = np.mean(x) + ((prior_a - 1.)/prior_adj + transform)/n
-    B = r + ((prior_b - 1.)/prior_adj + transform)/n
+    A = np.mean(x) + (prior_a - 1. + transform) / n / prior_adj
+    B = r + (prior_b - 1. + transform) / n / prior_adj
     p_hat = A / (A + B)
 
     # Compute score for r
@@ -388,12 +393,12 @@ def score_profile_posterior_nbinom(r, x, transform=False,
     score = (n*np.log(1.-p_hat) + np.sum(special.polygamma(0, x+r))
              - n*special.polygamma(0,r))
     # Prior
-    score += (-prior_prec_log*(np.log(r) - prior_mean_log)/r - 1./r)/prior_adj
+    score += (-prior_prec_log*(np.log(r) - prior_mean_log)/r - 1./r) / prior_adj
 
     # Handle log transformation of parameters via simple chain rule
     if transform:
         # Add Jacobian term
-        score += 1./r
+        score += 1. / r / prior_adj
 
         # Compute derivative of untransformed parameters wrt transformed ones
         deriv   = r
@@ -439,8 +444,8 @@ def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
     # Handle log transformation of parameters via simple chain rule
     if transform:
         # Add Jacobian terms
-        info[0,0] += 1./r**2
-        info[1,1] += (1.-2.*p) / p**2 / (1.-p)**2
+        info[0,0] += 1./r**2 / prior_adj
+        info[1,1] += (1.-2.*p) / p**2 / (1.-p)**2 / prior_adj
 
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = np.array([-n*np.log(1.-p) - np.sum(special.polygamma(0, x+r))
@@ -676,7 +681,7 @@ def laplace_approx(f, xhat, info, f_args=tuple(), f_kwargs={}):
 #==============================================================================
 
 def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
-                        prior_mean_log=0., prior_prec_log=0.,
+                        prior_mean_log=0., prior_prec_log=0., prior_adj=1.,
                         brent_scale=6., fallback_upper=10000.):
     '''
     Maximum a posteriori estimator for shape and rate parameters of gamma
@@ -698,7 +703,8 @@ def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
         upper = fallback_upper
 
     # Verify that score is negative at upper bound
-    args=(x, log, prior_shape, prior_rate, prior_mean_log, prior_prec_log)
+    args=(x, log, prior_shape, prior_rate, prior_mean_log, prior_prec_log,
+          prior_adj)
     while score_profile_posterior_gamma(upper, *args) > 0:
         upper *= 2.
 
@@ -708,8 +714,8 @@ def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
                                 args=args)
 
     # Compute posterior mode of rate
-    rate_hat = ((shape_hat + (prior_shape-1.+log)/n) /
-                (np.mean(x) + prior_rate/n))
+    rate_hat = ((shape_hat + (prior_shape-1.+log) / prior_adj / n) /
+                (np.mean(x) + prior_rate / prior_adj / n))
 
     return (shape_hat, rate_hat)
 
@@ -747,8 +753,8 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1., transform=False,
                             args=args)
 
     # Compute posterior mode of p
-    A = np.mean(x) + ((prior_a - 1.)/prior_adj + transform)/n
-    B = r_hat + ((prior_b - 1.)/prior_adj + transform)/n
+    A = np.mean(x) + (prior_a - 1. + transform) / n / prior_adj
+    B = r_hat + (prior_b - 1. + transform) / n / prior_adj
     p_hat = A / (A + B)
 
     return (r_hat, p_hat)
@@ -1431,7 +1437,7 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     #   - dim_param:(dim_prec + dim_param) : lower-triangular portion of info
     dim_prec = (dim_param*(dim_param+1))/2
     buf = np.zeros(dim_param + dim_prec, dtype=np.float)
-    approx = np.empty(dim_param + dim_prec, dtype=np.float)
+    approx = np.zeros(dim_param + dim_prec, dtype=np.float)
 
     # Compute sum of all point estimates and precisions
     comm.Reduce([buf, MPI.DOUBLE], [approx, MPI.DOUBLE],
@@ -1440,9 +1446,8 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     # Extract precision matrix
     prec = np.empty((dim_param, dim_param))
     ind_l = np.tril_indices(dim_param)
-    ind_u = np.triu_indices(dim_param)
     prec[ind_l] = approx[dim_param:]
-    prec[ind_u] = prec[ind_l]
+    prec.T[ind_l] = prec[ind_l]
 
     # Compute approximate posterior mean from information-weighted estimates
     est = approx[:dim_param]
@@ -1491,9 +1496,10 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
 
     shape_hat, rate_hat = map_estimator_gamma(x=precisions, log=True,
                                               prior_shape=prior_shape,
-                                              prior_rate=prior_rate/adj,
+                                              prior_rate=prior_rate,
                                               prior_mean_log=prior_mean_log,
-                                              prior_prec_log=prior_prec_log/adj,
+                                              prior_prec_log=prior_prec_log,
+                                              prior_adj=adj,
                                               brent_scale=brent_scale,
                                               fallback_upper=fallback_upper)
 
@@ -1504,9 +1510,10 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
     info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
                                 x=precisions, log=True,
                                 prior_shape=prior_shape,
-                                prior_rate=prior_rate/adj,
+                                prior_rate=prior_rate,
                                 prior_mean_log=prior_mean_log,
-                                prior_prec_log=prior_prec_log/adj)
+                                prior_prec_log=prior_prec_log,
+                                prior_adj=adj)
 
     # Compute information-weighted point estimate
     theta_hat   = np.log(np.array([shape_hat, rate_hat]))
@@ -1846,7 +1853,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
 
-def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=3.):
+def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.):
     '''
     Master component of single Metropolis-Hastings step for GLM coefficients
     using a normal approximation to their posterior distribution. Proposes
@@ -1896,8 +1903,8 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=3.):
 
     # Compute log-ratio of proposal densities. This is very easy with the
     # demeaned and decorrelated values z.
-    log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2/propDf)-
-                                            np.log(1. + z_prev**2 /propDf))
+    log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2 / propDf) -
+                                            np.log(1. + z_prev**2 / propDf))
 
     return mh_update(prop=b_prop, prev=b_prev,
                      log_target_ratio=log_target_ratio,
