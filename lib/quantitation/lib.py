@@ -1510,6 +1510,20 @@ def refine_distributed_approx(comm, est, prec, dim_param, MPIROOT=0):
 
     # Update approximation with single Newton-Raphson step
     est_refined = est + linalg.solve(hess, update[:dim_param])
+
+    # Broadcast updated point estimate
+    comm.Bcast([est, MPI.DOUBLE], root=MPIROOT)
+
+    # Collect updated Hessian
+    comm.Reduce([buf[dim_param:], MPI.DOUBLE], [update[dim_param:], MPI.DOUBLE],
+                op=MPI.SUM, root=MPIROOT)
+    
+    # Extract updated negative Hessian matrix
+    hess = np.empty((dim_param, dim_param))
+    ind_l = np.tril_indices(dim_param)
+    hess[ind_l] = update[dim_param:]
+    hess.T[ind_l] = hess[ind_l]
+
     return (est_refined, hess)
 
 
@@ -1908,6 +1922,21 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
 
     # Combine with other updates on master
     comm.Reduce([update, MPI.DOUBLE], None,
+                op=MPI.SUM, root=MPIROOT)
+
+    # Receive updated estimate
+    comm.Bcast([b_hat, MPI.DOUBLE], root=MPIROOT)
+
+    # Update information matrix
+    eta = np.dot(X, b_hat)
+    mu = family.link.inv(eta)
+    weights = w * family.weights(mu)
+    sqrt_W_X = (X.T * np.sqrt(weights)).T
+    
+    info = np.dot(sqrt_W_X.T, sqrt_W_X)
+    
+    # Combine informations on master
+    comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
                 op=MPI.SUM, root=MPIROOT)
 
 
