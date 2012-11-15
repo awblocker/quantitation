@@ -1431,7 +1431,7 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
             2d array of shape (dim_param, dim_param) containing approximate
             posterior precision for parameter.
     '''
-    # Using simply 1d format to send point estimates and precisions together.
+    # Using simple 1d format to send point estimates and precisions together.
     # Define dim_prec as dim_param*(dim_param+1)/2:
     #   - 0:dim_param : point estimate
     #   - dim_param:(dim_prec + dim_param) : lower-triangular portion of info
@@ -1454,6 +1454,64 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     est = linalg.solve(prec, est, sym_pos=True, lower=True)
 
     return (est, prec)
+
+def refine_distributed_approx(comm, est, prec, dim_param, MPIROOT=0):
+    '''
+    Execute single distributed Newton-Raphson step starting from
+    precision-weighted approximation. This refines the approximation; inspired
+    by 1-step efficient estimators.
+
+    Parameters
+    ----------
+        - comm : MPI communicator
+            Communicator from which to collect normal approximations
+        - dim_param : int
+            Size of parameter.
+        - MPIROOT : int
+            Rank of root for communicator. Defaults to 0.
+        - est : array_like
+            1d array of length dim_param containing approximate posterior mean
+            for parameter, as output by posterior_approx_distributed.
+        - prec : array_like
+            2d array of shape (dim_param, dim_param) containing approximate
+            posterior precision for parameter, as output by
+            posterior_approx_distributed.
+
+    Returns
+    -------
+        - est : array_like
+            1d array of length dim_param containing approximate posterior mean
+            for parameter, refined via distributed NR step.
+        - prec : array_like
+            2d array of shape (dim_param, dim_param) containing approximate
+            posterior precision for parameter, refined via distributed NR step.
+    '''
+    # Broadcast current estimate to workers
+    comm.Bcast([est, MPI.DOUBLE], root=MPIROOT)
+    
+    # Collect gradients and negative Hessians from workers.
+    # Using simple 1d format to send gradients and negative Hessians together.
+    # Define dim_hess as dim_param*(dim_param+1)/2:
+    #   - 0:dim_param : gradient
+    #   - dim_param:(dim_hess + dim_param) : lower-triangular portion of Hessian
+    dim_hess = (dim_param*(dim_param+1))/2
+    buf = np.zeros(dim_param + dim_hess, dtype=np.float)
+    update = np.zeros(dim_param + dim_hess, dtype=np.float)
+
+    # Compute sum of all point estimates and Hessians
+    comm.Reduce([buf, MPI.DOUBLE], [update, MPI.DOUBLE],
+                op=MPI.SUM, root=MPIROOT)
+
+    # Extract negative Hessian matrix
+    hess = np.empty((dim_param, dim_param))
+    ind_l = np.tril_indices(dim_param)
+    hess[ind_l] = update[dim_param:]
+    hess.T[ind_l] = hess[ind_l]
+
+    # Update approximation with single Newton-Raphson step
+    est_refined = est + linalg.solve(hess, update[:dim_param])
+    return (est_refined, hess)
+
 
 #==============================================================================
 # Specialized sampling routines for parallel implementation
@@ -1831,6 +1889,28 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
     comm.Reduce([approx, MPI.DOUBLE], None,
                 op=MPI.SUM, root=MPIROOT)
 
+
+    # Receive updated estimate from master
+    comm.Bcast([b_hat, MPI.DOUBLE], root=MPIROOT)
+
+    # Compute score and information matrix at combined estimate
+    eta = np.dot(X, b_hat)
+    mu = family.link.inv(eta)
+    weights = w * family.weights(mu)
+    dmu_deta = family.link.deriv(eta)
+    sqrt_W_X = (X.T * np.sqrt(weights)).T
+    
+    grad = np.dot(X.T, weights / dmu_deta * (y - mu))
+    info = np.dot(sqrt_W_X.T, sqrt_W_X)
+    
+    # Condense update to a single vector for reduction
+    update = np.r_[grad, info[np.tril_indices(2)]]
+
+    # Combine with other updates on master
+    comm.Reduce([update, MPI.DOUBLE], None,
+                op=MPI.SUM, root=MPIROOT)
+
+
     # Obtain proposed value of coefficients from master.
     b_prop = np.empty(p)
     comm.Bcast([b_prop, MPI.DOUBLE], root=MPIROOT)
@@ -1878,7 +1958,12 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.):
     # workers.
     b_hat, prec = posterior_approx_distributed(comm=comm, dim_param=p,
                                                MPIROOT=MPIROOT)
+    
+    # Refine approximation with single Newton-Raphson step
+    b_hat, prec = refine_distributed_approx(comm=comm, est=b_hat, prec=prec,
+                                            dim_param=p, MPIROOT=MPIROOT)
 
+    
     # Cholesky decompose precision matrix for draws and density calculations
     U = linalg.cholesky(prec, lower=False)
 
