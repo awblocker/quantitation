@@ -1500,18 +1500,19 @@ def refine_distributed_approx(comm, est, prec, dim_param, n_iter=1,
     dim_hess = (dim_param*(dim_param+1))/2
     buf = np.zeros(dim_param + dim_hess, dtype=np.float)
     update = np.zeros(dim_param + dim_hess, dtype=np.float)
+    hess = np.empty((dim_param, dim_param))
+    ind_l = np.tril_indices(dim_param)
 
     for i in xrange(n_iter):
         # Broadcast current estimate to workers
         comm.Bcast([est, MPI.DOUBLE], root=MPIROOT)
         
-        # Compute sum of all point estimates and Hessians
+        # Compute sum of all gradients and Hessians
+        buf[:] = 0.
         comm.Reduce([buf, MPI.DOUBLE], [update, MPI.DOUBLE],
                     op=MPI.SUM, root=MPIROOT)
 
         # Extract negative Hessian matrix
-        hess = np.empty((dim_param, dim_param))
-        ind_l = np.tril_indices(dim_param)
         hess[ind_l] = update[dim_param:]
         hess.T[ind_l] = hess[ind_l]
 
