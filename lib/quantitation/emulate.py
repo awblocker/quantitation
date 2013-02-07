@@ -4,6 +4,29 @@ from scipy import spatial
 
 # Covariance functions
 
+def approx_quantile(coverage_prob, d, n):
+    '''
+    Compute approximate coverage_prob quantile of maximal distance between n
+    spherically-distributed points with identity covariance and the origin.
+
+    Arguments
+    ---------
+    coverage_prob : number
+        Probability that maximum distance is less than returned value.
+    d : integer
+        Number of dimensions.
+    n : integer
+        Number of distances over which points are distributed.
+
+    Returns
+    -------
+    q : float
+        Approximate coverage_prob quantile of maximum distance distribution.
+    '''
+    return np.sqrt(np.sqrt(2. * d) * (-np.log(-np.log(coverage_prob)) /
+                                      np.sqrt(2*np.log(n)) + 2*np.log(n) -
+                                      0.5*np.log(np.log(n))))
+
 def cov_sqexp(r, scale=1.):
     '''
     Squared exponential (Gaussian) covariance function with given scale.
