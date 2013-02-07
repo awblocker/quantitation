@@ -10,7 +10,7 @@ def cov_sqexp(r, scale=1.):
     '''
     return np.exp( - (r / scale)**2 )
 
-def build_emulator(f, center, cov=cov_sqexp, grid_radius=1.,
+def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
                    grid_transform=None, grid_min_spacing=0.5,
                    grid_shape='spherical', f_args=(), f_kwargs={}, cov_args=(),
                    cov_kwargs={}, min_cov=1e-9, cov_step=10.,
@@ -22,11 +22,13 @@ def build_emulator(f, center, cov=cov_sqexp, grid_radius=1.,
     ---------- 
     f : function
         Function to emulate. Must take a d x n matrix as its first argument and
-        return return an ndarray of length n containing the function value for
+        return return a k x n ndarray containing the function value for
         each d-dimensional column of the input matrix. Called as
         f(x, *f_args, **f_kwargs) in evaluations.
     center : d length ndarray
         Center of sampling region for emulator.
+    slope_mean : d x d ndarray
+        Optional linear approximation for f(x - center).
     cov : function
         Covariance function for Gaussian process. Must accept ndarray of
         distances as first argument and return an ndarray of the same dimension.
@@ -67,6 +69,10 @@ def build_emulator(f, center, cov=cov_sqexp, grid_radius=1.,
             The computed grid for approximation
         - v : n_grid length ndarray
             Vector for approximation
+        - center : d length ndarray
+            Center of emulation region
+        - slope_mean : d x d ndarray
+            Optional slope of linear mean function. Can be None.
     '''
     # Get dimensions
     d = np.size(center)
@@ -103,6 +109,9 @@ def build_emulator(f, center, cov=cov_sqexp, grid_radius=1.,
 
     # Evaluate function over grid
     f_values = f(grid.T, *f_args, **f_kwargs)
+    
+    if slope_mean is not None:
+        f_values -= np.dot(slope_mean, (grid - center).T)
 
     # Compute covariance matrix for GP
     C = spatial.distance_matrix(grid, grid, p=2)
@@ -122,10 +131,11 @@ def build_emulator(f, center, cov=cov_sqexp, grid_radius=1.,
         log10_condition = np.ptp(np.log10(svals))
 
     # Compute vector for subsequent approximations
-    v = linalg.solve(C, f_values)
+    v = linalg.solve(C, f_values.T)
 
     # Build output
-    emulator = {'grid' : grid, 'v' : v}
+    emulator = {'grid' : grid, 'v' : v, 
+                'center' : center, 'slope_mean' : slope_mean}
 
     return emulator
 
@@ -164,6 +174,12 @@ def evaluate_emulator(x, emulator, cov, cov_args=(), cov_kwargs={}):
     C = spatial.distance_matrix(x.T, emulator['grid'])
     C = cov(C, *cov_args, **cov_kwargs)
 
-    # Estimate function value at point
-    return np.dot(C, emulator['v'])
+    # Estimate function values at x
+    f_hat = np.dot(C, emulator['v']).T
+    
+    # Add linear term if needed
+    if emulator['slope_mean'] is not None:
+        f_hat += np.dot(emulator['slope_mean'], (x.T - emulator['center']).T)
+
+    return f_hat
 
