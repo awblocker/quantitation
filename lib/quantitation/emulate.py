@@ -217,3 +217,73 @@ def evaluate_emulator(x, emulator, cov, cov_args=(), cov_kwargs={}):
 
     return f_hat
 
+def evaluate_emulator_nogrid(x, v, center, cov, slope_mean=None, grid_radius=1.,
+                             grid_transform=None, grid_min_spacing=0.5,
+                             grid_shape='spherical', cov_args=(),
+                             cov_kwargs={}):
+    '''
+    Evaluates emulator at given point or sequence of points, reconstructing the
+    grid from other arguments. This is useful in communication-limited settings
+    where the grid parameters are common knowledge.
+    
+    Arguments
+    ---------
+    x : ndarray
+        Array of length d or of dimension d x m, with each column containing a
+        point at which to evaluate the emulator.
+    v : n_grid length ndarray
+        Vector for approximation.
+    center : d length ndarray
+        Center of emulation region.
+    cov : function
+        Covariance function for Gaussian process. Must accept ndarray of
+        distances as first argument and return an ndarray of the same dimension.
+        Called as cov(dm, *cov_args, **cov_kwargs).
+    slope_mean : d x d ndarray
+        Optional slope of linear mean function. Can be None.
+    grid_radius : number
+        Minimum radius of grid before transform, inclusive.
+    grid_transform : np.ndarray or matrix
+        Optional d x d nd.array or matrix providing transformation from cubic or
+        spherical grid into space of interest. Should be lower-triangular and
+        positive-definite.
+    grid_min_spacing : float
+        Minimum spacing of grid after transformation.
+    grid_shape : string
+        Shape of grid, 'cubic' or 'spherical'. Spherical is truncated cubic
+        grid.
+    cov_args : tuple
+        Tuple of additional positional arguments for cov.
+    cov_kwargs : tuple
+        Dictionary of additional kw arguments for cov.
+    
+    Returns
+    -------
+    f_hat : ndarray
+        Array of length m containing estimated values of function.
+    '''
+    # Convert x to matrix if needed
+    if not type(x) is np.ndarray:
+        x = np.array(x)
+    if len(x.shape) < 2:
+        x = x[:, np.newaxis]
+
+    # Build grid
+    grid = build_grid(d=d, grid_radius=grid_radius,
+                      grid_transform=grid_transform,
+                      grid_min_spacing=grid_min_spacing, grid_shape=grid_shape)
+    grid += center
+
+    # Evaluate distances between x and grid
+    C = spatial.distance_matrix(x.T, grid)
+    C = cov(C, *cov_args, **cov_kwargs)
+
+    # Estimate function values at x
+    f_hat = np.dot(C, v).T
+    
+    # Add linear term if needed
+    if slope_mean is not None:
+        f_hat += np.dot(slope_mean, (x.T - slope_mean).T)
+
+    return f_hat
+
