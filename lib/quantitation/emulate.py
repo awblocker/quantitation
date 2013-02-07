@@ -10,6 +10,64 @@ def cov_sqexp(r, scale=1.):
     '''
     return np.exp( - (r / scale)**2 )
 
+def build_grid(d, grid_radius=1., grid_transform=None, grid_min_spacing=0.5,
+               grid_shape='spherical'):
+    '''
+    Build regular cubic or spherical grid in d dimensions.
+
+    Arguments
+    ---------
+    d : integer
+        Number of dimensions for grid.
+    grid_radius : number
+        Minimum radius of grid before transform, inclusive.
+    grid_transform : np.ndarray or matrix
+        Optional d x d nd.array or matrix providing transformation from cubic or
+        spherical grid into space of interest. Should be lower-triangular and
+        positive-definite.
+    grid_min_spacing : float
+        Minimum spacing of grid after transformation.
+    grid_shape : string
+        Shape of grid, 'cubic' or 'spherical'. Spherical is truncated cubic
+        grid.
+
+    Returns
+    -------
+    grid : ndarray
+        d x n_grid ndarray containing the computed grid. Each column is a single
+        vector in R^d.
+    '''
+    # Find eigenvalues of transformation
+    if grid_transform is None:
+        transform_eigenvalues = np.ones(d)
+    else:
+        transform_eigenvalues = np.diag(grid_transform)
+
+    # Build grid before rotation and scaling, adjusting spacing as needed
+    grid_radius = float(grid_radius)
+    h_grid = [grid_radius / np.ceil(grid_radius / grid_min_spacing * v) for v
+              in transform_eigenvalues]
+    dim_grid = [int(2 * grid_radius / h + 1) for h in h_grid]
+    dim_grid_float = np.array(dim_grid, dtype=float)
+    grid = np.mgrid[tuple(slice(0, l) for l in dim_grid)]
+    grid = np.array([z.flatten() for z in grid], dtype=float).T
+    grid /= (dim_grid_float - 1.) / 2.
+    grid -= 1.
+
+    # Truncate to sphere if requested
+    if grid_shape[:5] == 'spher':
+        grid = grid[np.sum(grid**2, 1) <= 1]
+
+    # Rescale for radius
+    grid *= grid_radius
+
+    # Transform and recenter
+    if grid_transform is not None:
+        grid = np.dot(grid, grid_transform.T)
+
+    return grid
+
+
 def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
                    grid_transform=None, grid_min_spacing=0.5,
                    grid_shape='spherical', f_args=(), f_kwargs={}, cov_args=(),
@@ -77,34 +135,10 @@ def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
     # Get dimensions
     d = np.size(center)
 
-    # Find eigenvalues of transformation
-    if grid_transform is None:
-        transform_eigenvalues = np.ones(d)
-    else:
-        transform_eigenvalues = np.diag(grid_transform)
-
-    # Build grid before rotation and scaling, adjusting spacing as needed
-    grid_radius = float(grid_radius)
-    h_grid = [grid_radius / np.ceil(grid_radius / grid_min_spacing * v) for v
-              in transform_eigenvalues]
-    dim_grid = [int(2 * grid_radius / h + 1) for h in h_grid]
-    dim_grid_float = np.array(dim_grid, dtype=float)
-    grid = np.mgrid[tuple(slice(0, l) for l in dim_grid)]
-    grid = np.array([z.flatten() for z in grid], dtype=float).T
-    grid /= (dim_grid_float - 1.) / 2.
-    grid -= 1.
-
-    # Truncate to sphere if requested
-    if grid_shape[:5] == 'spher':
-        grid = grid[np.sum(grid**2, 1) <= 1]
-
-    # Rescale for radius
-    grid *= grid_radius
-
-    # Transform and recenter
-    if grid_transform is not None:
-        grid = np.dot(grid, grid_transform.T)
-
+    # Build grid
+    grid = build_grid(d=d, grid_radius=grid_radius,
+                      grid_transform=grid_transform,
+                      grid_min_spacing=grid_min_spacing, grid_shape=grid_shape)
     grid += center
 
     # Evaluate function over grid
