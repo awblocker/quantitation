@@ -8,7 +8,7 @@ AUTHOR_EMAIL = 'ablocker@gmail.com'
 URL = 'http://www.awblocker.com'
 DESCRIPTION = 'Absolute quantitation for LC/MSMS proteomics via MCMC'
 
-REQUIRES = ['numpy(>=1.6)','scipy(>=0.9)', 'yaml', 'mpi4py']
+REQUIRES = ['numpy(>=1.6)','scipy(>=0.9)', 'yaml', 'mpi4py', 'glm']
 
 PACKAGE_DIR = {'': 'lib'}
 PACKAGES = ['quantitation','quantitation.glm']
