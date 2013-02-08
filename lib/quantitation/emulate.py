@@ -373,3 +373,49 @@ def aggregate_emulators(emulators):
     emulator = {'grid': grid_agg, 'v': v_agg,
                 'center': center_agg, 'slope_mean': slope_mean_agg}
 
+    return emulator
+
+
+def aggregate_emulators_mpi(comm, emulator=None, MPIROOT=0):
+    '''
+    Aggregate emulators from workers into a single emulator for their sum via
+    MPI gather operation (serialized).
+
+    Arguments
+    ---------
+    comm : mpi4py communicator
+        MPI communicator.
+    emulator : dict
+        Dictionary as output by build_emulator containing grid and v.
+    MPIROOT : int
+        Rank of root MPI process.
+
+    Returns
+    -------
+    On the workers, None.
+
+    On the master,
+    emulator : dict
+      A dictionary for the combined emulator containing
+      - grid : d x n_grid ndarray
+        The computed grid for approximation.
+      - v : n_grid x k ndarray
+        Array for approximation.
+      - center : d length ndarray
+        Center of emulation region.
+      - slope_mean : d x d ndarray
+        Optional slope of linear mean function. Can be None.
+    '''
+    # Get number of workers and MPI rank
+    mpi_rank = comm.Get_rank()
+
+    if mpi_rank == MPIROOT:
+        # Master node process
+        # Gather entire emulators from individual nodes
+        emulator_list = comm.gather(None, root=MPIROOT)[1:]
+
+        return aggregate_emulators(emulator_list)
+    else:
+        # Worker node process
+        # Send emulator to aggregator
+        comm.gather(emulator, root=MPIROOT)
