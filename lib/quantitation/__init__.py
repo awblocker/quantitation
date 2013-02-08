@@ -2,6 +2,9 @@
 import lib
 import glm
 
+# Import serial MCMC updates
+import mcmc_updates_serial
+
 # Expose contents of MCMC modules
 from mcmc_serial import *
 

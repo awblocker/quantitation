@@ -5,6 +5,8 @@ from mpi4py import MPI
 
 import lib
 import glm
+import mcmc_updates_serial as updates_serial
+import mcmc_updates_parallel as updates_parallel
 
 # Set constants
 
@@ -314,7 +316,7 @@ def master(comm, data, cfg):
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['SIGMA'])
 
-        result = lib.rmh_master_variance_hyperparams(comm=comm,
+        result = updates_parallel.rmh_master_variance_hyperparams(comm=comm,
                                                 shape_prev=shape_sigmasq[t-1],
                                                 rate_prev=rate_sigmasq[t-1],
                                                 **cfg['priors']['sigmasq_dist'])
@@ -327,7 +329,7 @@ def master(comm, data, cfg):
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['TAU'])
 
-        result = lib.rmh_master_variance_hyperparams(comm=comm,
+        result = updates_parallel.rmh_master_variance_hyperparams(comm=comm,
                                                   shape_prev=shape_tausq[t-1],
                                                   rate_prev=rate_tausq[t-1],
                                                   **cfg['priors']['tausq_dist'])
@@ -340,7 +342,7 @@ def master(comm, data, cfg):
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['NSTATES'])
 
-        result = lib.rmh_master_nbinom_hyperparams(comm=comm,
+        result = updates_parallel.rmh_master_nbinom_hyperparams(comm=comm,
                                                r_prev=r[t-1], p_prev=lmbda[t-1],
                                                **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
@@ -352,7 +354,7 @@ def master(comm, data, cfg):
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['ETA'])
 
-        eta_draws[t], accept = lib.rmh_master_glm_coef(comm=comm,
+        eta_draws[t], accept = updates_parallel.rmh_master_glm_coef(comm=comm,
                                                        b_prev=eta_draws[t-1],
                                                        MPIROOT=MPIROOT)
         accept_stats['eta'] += accept
@@ -361,7 +363,7 @@ def master(comm, data, cfg):
         # (6) Update random censoring probability. Distributed Gibbs step.
         for worker in xrange(1, n_workers+1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['PRNDCEN'])
-        p_rnd_cen[t] = lib.rgibbs_master_p_rnd_cen(comm=comm, MPIROOT=MPIROOT,
+        p_rnd_cen[t] = updates_parallel.rgibbs_master_p_rnd_cen(comm=comm, MPIROOT=MPIROOT,
                                                    **cfg['priors']['p_rnd_cen'])
 
 
@@ -599,22 +601,20 @@ def worker(comm, rank, data, cfg):
 
 
             # (2) Update peptide-level mean parameters (gamma). Gibbs step.
-            gamma_draws[t] = lib.rgibbs_gamma(
-                                       mu=mu_draws[t-1][mapping_peptides],
-                                       tausq=tausq_draws[t-1][mapping_peptides],
-                                       sigmasq=var_peptide_conditional,
-                                       y_bar=mean_intensity_per_peptide,
-                                       n_states=n_states_per_peptide)
+            gamma_draws[t] = updates_serial.rgibbs_gamma(
+              mu=mu_draws[t-1][mapping_peptides],
+              tausq=tausq_draws[t-1][mapping_peptides],
+              sigmasq=var_peptide_conditional, y_bar=mean_intensity_per_peptide,
+              n_states=n_states_per_peptide)
             mean_gamma_by_protein = np.bincount(mapping_peptides,
                                                 weights=gamma_draws[t])
             mean_gamma_by_protein /= n_peptides_per_protein
 
 
             # (3) Update protein-level mean parameters (mu). Gibbs step.
-            mu_draws[t] = lib.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
-                                        tausq=tausq_draws[t-1],
-                                        n_peptides=n_peptides_per_protein,
-                                        **cfg['priors']['mu'])
+            mu_draws[t] = updates_serial.rgibbs_mu(
+              gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t-1],
+              n_peptides=n_peptides_per_protein, **cfg['priors']['mu'])
 
 
             # (4) Update state-level variance parameters (sigmasq). Gibbs step.
@@ -628,7 +628,7 @@ def worker(comm, rank, data, cfg):
             rss_by_protein += np.bincount(mapping_peptides[mapping_states_cen],
                                           weights=rss_by_state,
                                           minlength=n_proteins)
-            sigmasq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
+            sigmasq_draws[t] = updates_serial.rgibbs_variances(rss=rss_by_protein,
                                                 n=n_states_per_protein,
                                                 prior_shape=shape_sigmasq,
                                                 prior_rate=rate_sigmasq)
@@ -659,13 +659,13 @@ def worker(comm, rank, data, cfg):
             rss_by_peptide = (gamma_draws[t] - mu_draws[t,mapping_peptides])**2
             rss_by_protein = np.bincount(mapping_peptides,
                                          weights=rss_by_peptide)
-            tausq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
+            tausq_draws[t] = updates_serial.rgibbs_variances(rss=rss_by_protein,
                                                   n=n_peptides_per_protein,
                                                   prior_shape=shape_tausq,
                                                   prior_rate=rate_tausq)
         elif task == TAGS['SIGMA']:
             # Run distributed MH step for sigmasq hyperparameters
-            lib.rmh_worker_variance_hyperparams(comm=comm,
+            updates_parallel.rmh_worker_variance_hyperparams(comm=comm,
                                                 variances=sigmasq_draws[t],
                                                 shape_prev=shape_sigmasq,
                                                 rate_prev=rate_sigmasq,
@@ -673,7 +673,7 @@ def worker(comm, rank, data, cfg):
                                                 **cfg['priors']['sigmasq_dist'])
         elif task == TAGS['TAU']:
             # Run distributed MH step for sigmasq hyperparameters
-            lib.rmh_worker_variance_hyperparams(comm=comm,
+            updates_parallel.rmh_worker_variance_hyperparams(comm=comm,
                                                 variances=tausq_draws[t],
                                                 shape_prev=shape_tausq,
                                                 rate_prev=rate_tausq,
@@ -681,7 +681,7 @@ def worker(comm, rank, data, cfg):
                                                 **cfg['priors']['tausq_dist'])
         elif task == TAGS['NSTATES']:
             # Run distributed MH step for n_states hyperparameters
-            lib.rmh_worker_nbinom_hyperparams(comm=comm,
+            updates_parallel.rmh_worker_nbinom_hyperparams(comm=comm,
                                               x=n_states_per_peptide-1,
                                               r_prev=r, p_prev=lmbda,
                                               MPIROOT=MPIROOT,
@@ -703,14 +703,14 @@ def worker(comm, rank, data, cfg):
             fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True)
 
             # Handle distributed computation draw
-            lib.rmh_worker_glm_coef(comm=comm, b_prev=eta, family=logit_family,
-                                    y=y, X=X, MPIROOT=MPIROOT, **fit_eta)
+            updates_parallel.rmh_worker_glm_coef(
+              comm=comm, b_prev=eta, family=logit_family, y=y, X=X,
+              MPIROOT=MPIROOT, **fit_eta)
         elif task == TAGS['PRNDCEN']:
             # Run distributed Gibbs step for p_rnd_cen
-            lib.rgibbs_worker_p_rnd_cen(comm=comm,
-                                        n_rnd_cen=np.sum(W, dtype=np.int),
-                                        n_states=n_states,
-                                        MPIROOT=MPIROOT)
+            updates_parallel.rgibbs_worker_p_rnd_cen(
+              comm=comm, n_rnd_cen=np.sum(W, dtype=np.int), n_states=n_states,
+              MPIROOT=MPIROOT)
         elif task == TAGS['SAVE']:
             # Construct path for worker-specific results
             path_worker = cfg['output']['pattern_results_worker'] % rank

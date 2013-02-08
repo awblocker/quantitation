@@ -4,6 +4,7 @@ import numpy as np
 
 import lib
 import glm
+import mcmc_updates_serial as updates
 
 def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
     '''
@@ -225,7 +226,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         
         # (2) Update random censoring probability. Gibbs step.
-        p_rnd_cen[t] = lib.rgibbs_p_rnd_cen(n_rnd_cen=np.sum(W),
+        p_rnd_cen[t] = updates.rgibbs_p_rnd_cen(n_rnd_cen=np.sum(W),
                                             n_states=n_states,
                                             **cfg['priors']['p_rnd_cen'])
         
@@ -242,7 +243,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
                                        
                                        
         # (3) Update peptide-level mean parameters (gamma). Gibbs step.
-        gamma_draws[t] = lib.rgibbs_gamma(mu=mu_draws[t-1][mapping_peptides],
+        gamma_draws[t] = updates.rgibbs_gamma(mu=mu_draws[t-1][mapping_peptides],
                                        tausq=tausq_draws[t-1][mapping_peptides],
                                        sigmasq=var_peptide_conditional,
                                        y_bar=mean_intensity_per_peptide,
@@ -253,7 +254,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         
         # (4) Update protein-level mean parameters (mu). Gibbs step.
-        mu_draws[t] = lib.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
+        mu_draws[t] = updates.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
                                     tausq=tausq_draws[t-1],
                                     n_peptides=n_peptides_per_protein,
                                     **cfg['priors']['mu'])
@@ -268,7 +269,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         rss_by_protein += np.bincount(mapping_peptides[mapping_states_cen],
                                       weights=rss_by_state,
                                       minlength=n_proteins)
-        sigmasq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
+        sigmasq_draws[t] = updates.rgibbs_variances(rss=rss_by_protein,
                                                 n=n_states_per_protein,
                                                 prior_shape=shape_sigmasq[t-1],
                                                 prior_rate=rate_sigmasq[t-1])
@@ -280,7 +281,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         # (6) Update peptide-level variance parameters (tausq). Gibbs step.
         rss_by_peptide = (gamma_draws[t] - mu_draws[t,mapping_peptides])**2
         rss_by_protein = np.bincount(mapping_peptides, weights=rss_by_peptide)
-        tausq_draws[t] = lib.rgibbs_variances(rss=rss_by_protein,
+        tausq_draws[t] = updates.rgibbs_variances(rss=rss_by_protein,
                                               n=n_peptides_per_protein,
                                               prior_shape=shape_tausq[t-1],
                                               prior_rate=rate_tausq[t-1])
@@ -288,7 +289,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         # (7) Update state-level variance hyperparameters (sigmasq
         #   distribution). Conditional independence-chain MH step.
-        result = lib.rmh_variance_hyperparams(variances=sigmasq_draws[t],
+        result = updates.rmh_variance_hyperparams(variances=sigmasq_draws[t],
                                               shape_prev=shape_sigmasq[t-1],
                                               rate_prev=rate_sigmasq[t-1],
                                               **cfg['priors']['sigmasq_dist'])
@@ -298,7 +299,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         # (8) Update peptide-level variance hyperparameters (tausq
         #   distribution). Conditional independence-chain MH step.
-        result = lib.rmh_variance_hyperparams(variances=tausq_draws[t],
+        result = updates.rmh_variance_hyperparams(variances=tausq_draws[t],
                                               shape_prev=shape_tausq[t-1],
                                               rate_prev=rate_tausq[t-1],
                                               **cfg['priors']['tausq_dist'])
@@ -308,7 +309,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
         
         # (9) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
-        result = lib.rmh_nbinom_hyperparams(x=n_states_per_peptide-1,
+        result = updates.rmh_nbinom_hyperparams(x=n_states_per_peptide-1,
                                             r_prev=r[t-1], p_prev=lmbda[t-1],
                                             **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
