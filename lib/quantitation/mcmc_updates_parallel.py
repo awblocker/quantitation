@@ -1,6 +1,7 @@
 from lib import *
 from mcmc_updates_serial import mh_update
 
+
 def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     '''
     Compute normal approximation to a posterior distribution based upon normal
@@ -31,7 +32,7 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     # Define dim_prec as dim_param*(dim_param+1)/2:
     #   - 0:dim_param : point estimate
     #   - dim_param:(dim_prec + dim_param) : lower-triangular portion of info
-    dim_prec = (dim_param*(dim_param+1))/2
+    dim_prec = (dim_param * (dim_param + 1)) / 2
     buf = np.zeros(dim_param + dim_prec, dtype=np.float)
     approx = np.zeros(dim_param + dim_prec, dtype=np.float)
 
@@ -50,6 +51,7 @@ def posterior_approx_distributed(comm, dim_param, MPIROOT=0):
     est = linalg.solve(prec, est, sym_pos=True, lower=True)
 
     return (est, prec)
+
 
 def refine_distributed_approx(comm, est, prec, dim_param, n_iter=1,
                               final_info=1, MPIROOT=0):
@@ -87,13 +89,13 @@ def refine_distributed_approx(comm, est, prec, dim_param, n_iter=1,
     # workers
     settings = np.array([n_iter, final_info], dtype=int)
     comm.Bcast([settings, MPI.INT], root=MPIROOT)
-    
+
     # Initialize buffers
     # Using simple 1d format to send gradients and negative Hessians together.
     # Define dim_hess as dim_param*(dim_param+1)/2:
     #   - 0:dim_param : gradient
     #   - dim_param:(dim_hess + dim_param) : lower-triangular portion of Hessian
-    dim_hess = (dim_param*(dim_param+1))/2
+    dim_hess = (dim_param * (dim_param + 1)) / 2
     buf = np.zeros(dim_param + dim_hess, dtype=np.float)
     update = np.zeros(dim_param + dim_hess, dtype=np.float)
     hess = np.empty((dim_param, dim_param))
@@ -102,7 +104,7 @@ def refine_distributed_approx(comm, est, prec, dim_param, n_iter=1,
     for i in xrange(n_iter):
         # Broadcast current estimate to workers
         comm.Bcast([est, MPI.DOUBLE], root=MPIROOT)
-        
+
         # Compute sum of all gradients and Hessians
         buf[:] = 0.
         comm.Reduce([buf, MPI.DOUBLE], [update, MPI.DOUBLE],
@@ -123,7 +125,7 @@ def refine_distributed_approx(comm, est, prec, dim_param, n_iter=1,
         comm.Reduce([buf[dim_param:], MPI.DOUBLE],
                     [update[dim_param:], MPI.DOUBLE], op=MPI.SUM,
                     root=MPIROOT)
-        
+
         # Extract updated negative Hessian matrix
         hess = np.empty((dim_param, dim_param))
         ind_l = np.tril_indices(dim_param)
@@ -140,7 +142,7 @@ def refine_distributed_approx(comm, est, prec, dim_param, n_iter=1,
 def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
                                     MPIROOT=0,
                                     prior_mean_log=2.65,
-                                    prior_prec_log=1./0.652**2,
+                                    prior_prec_log=1. / 0.652 ** 2,
                                     prior_shape=1., prior_rate=0.,
                                     brent_scale=6., fallback_upper=10000.,
                                     correct_prior=False):
@@ -170,7 +172,7 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
         adj = comm.Get_size() - 1.
 
     # Compute posterior mode for shape and rate using profile log-posterior
-    precisions = 1./variances
+    precisions = 1. / variances
 
     shape_hat, rate_hat = map_estimator_gamma(x=precisions, log=True,
                                               prior_shape=prior_shape,
@@ -194,8 +196,8 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
                                 prior_adj=adj)
 
     # Compute information-weighted point estimate
-    theta_hat   = np.log(np.array([shape_hat, rate_hat]))
-    z_hat       = np.dot(info, theta_hat)
+    theta_hat = np.log(np.array([shape_hat, rate_hat]))
+    z_hat = np.dot(info, theta_hat)
 
     # Condense approximation to a single vector for reduction
     approx = np.r_[z_hat, info[np.tril_indices(2)]]
@@ -220,14 +222,15 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
 
     # Reduce log-target ratio for MH step on master.
     comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
-                 op=MPI.SUM, root=MPIROOT)
+                op=MPI.SUM, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
 
+
 def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
                                     prior_mean_log=2.65,
-                                    prior_prec_log=1./0.652**2,
+                                    prior_prec_log=1. / 0.652 ** 2,
                                     prior_shape=1., prior_rate=0.,
                                     propDf=5.):
     '''
@@ -257,21 +260,21 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     # workers.
     theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
                                                    MPIROOT=MPIROOT)
-    
+
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
     U = linalg.cholesky(prec, lower=False)
 
     # Propose shape and rate parameter jointly
     z_prop = (np.random.randn(2) /
-              np.sqrt(np.random.gamma(shape=propDf/2., scale=2.,
+              np.sqrt(np.random.gamma(shape=propDf / 2., scale=2.,
                                       size=2) / propDf))
-    theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
+    theta_prop = theta_hat + linalg.solve_triangular(U, z_prop)
     shape_prop, rate_prop = np.exp(theta_prop)
 
     # Demean and decorrelate previous draws
-    theta_prev  = np.log(np.array([shape_prev, rate_prev]))
-    z_prev      = np.dot(U, theta_prev - theta_hat)
+    theta_prev = np.log(np.array([shape_prev, rate_prev]))
+    z_prev = np.dot(U, theta_prev - theta_hat)
 
     # Broadcast theta_prop to workers
     comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
@@ -287,9 +290,9 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     if prior_prec_log > 0:
         # Add the log-normal prior on the shape parameter
         log_target_ratio += (dlnorm(shape_prop, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log, log=True) -
+                                    sigmasq=1. / prior_prec_log, log=True) -
                              dlnorm(shape_prev, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log, log=True))
+                                    sigmasq=1. / prior_prec_log, log=True))
     # Add the gamma prior on the rate parameter
     if prior_rate > 0:
         log_target_ratio += (dgamma(rate_prop, shape=prior_shape,
@@ -297,7 +300,7 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
                              dgamma(rate_prev, shape=prior_shape,
                                     rate=prior_rate, log=True))
     else:
-        log_target_ratio += np.log(rate_prop/rate_prev)*(shape_prop - 1.)
+        log_target_ratio += np.log(rate_prop / rate_prev) * (shape_prop - 1.)
 
     # Compute log-ratio of proposal densities
 
@@ -305,20 +308,21 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     # matrices, so the resulting Jacobian terms cancel. We are left to
     # contend with the z's and the Jacobian terms resulting from
     # exponentiation.
-    log_prop_ratio = -np.sum(np.log(1. + z_prop**2/propDf)-
-                             np.log(1. + z_prev**2/propDf))
-    log_prop_ratio *= (propDf+1.)/2.
+    log_prop_ratio = -np.sum(np.log(1. + z_prop ** 2 / propDf) -
+                             np.log(1. + z_prev ** 2 / propDf))
+    log_prop_ratio *= (propDf + 1.) / 2.
     log_prop_ratio += -np.sum(theta_prop - theta_prev)
 
     # Execute MH update
-    return mh_update(prop=(shape_prop, rate_prop), prev=(shape_prev, rate_prev),
-                     log_target_ratio=log_target_ratio,
-                     log_prop_ratio=log_prop_ratio)
+    return mh_update(
+        prop=(shape_prop, rate_prop), prev=(shape_prev, rate_prev),
+        log_target_ratio=log_target_ratio,
+        log_prop_ratio=log_prop_ratio)
 
 
 def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                                   prior_mean_log=2.65,
-                                  prior_prec_log=1./0.652**2,
+                                  prior_prec_log=1. / 0.652 ** 2,
                                   prior_a=1., prior_b=1.,
                                   brent_scale=6., fallback_upper=10000.,
                                   correct_prior=True):
@@ -365,9 +369,9 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                                  prior_prec_log=prior_prec_log, prior_adj=adj)
 
     # Compute information-weighted point estimate
-    theta_hat   = np.log(np.array([r_hat, p_hat]))
-    theta_hat[1] -= np.log(1.-p_hat)
-    z_hat       = np.dot(info, theta_hat)
+    theta_hat = np.log(np.array([r_hat, p_hat]))
+    theta_hat[1] -= np.log(1. - p_hat)
+    z_hat = np.dot(info, theta_hat)
 
     # Condense approximation to a single vector for reduction
     approx = np.r_[z_hat, info[np.tril_indices(2)]]
@@ -391,14 +395,15 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
 
     # Reduce log-target ratio for MH step on master.
     comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
-                 op=MPI.SUM, root=MPIROOT)
+                op=MPI.SUM, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
 
+
 def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
                                   prior_mean_log=2.65,
-                                  prior_prec_log=1./0.652**2,
+                                  prior_prec_log=1. / 0.652 ** 2,
                                   prior_a=1., prior_b=1.,
                                   propDf=5.):
     '''
@@ -427,23 +432,23 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     # workers.
     theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
                                                    MPIROOT=MPIROOT)
-    
+
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
     U = linalg.cholesky(prec, lower=False)
 
     # Propose r and p jointly
     z_prop = (np.random.randn(2) /
-              np.sqrt(np.random.gamma(shape=propDf/2., scale=2.,
+              np.sqrt(np.random.gamma(shape=propDf / 2., scale=2.,
                                       size=2) / propDf))
-    theta_prop  = theta_hat + linalg.solve_triangular(U, z_prop)
+    theta_prop = theta_hat + linalg.solve_triangular(U, z_prop)
     r_prop, p_prop = np.exp(theta_prop)
     p_prop = p_prop / (1. + p_prop)
 
     # Demean and decorrelate previous draws
-    theta_prev  = np.log(np.array([r_prev, p_prev]))
-    theta_prev[1] -= np.log(1.-p_prev)
-    z_prev      = np.dot(U, theta_prev - theta_hat)
+    theta_prev = np.log(np.array([r_prev, p_prev]))
+    theta_prev[1] -= np.log(1. - p_prev)
+    z_prev = np.dot(U, theta_prev - theta_hat)
 
     # Broadcast theta_prop to workers
     comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
@@ -458,9 +463,9 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     if prior_prec_log > 0:
         # Add the log-normal prior on r
         log_target_ratio += (dlnorm(r_prop, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log, log=True) -
+                                    sigmasq=1. / prior_prec_log, log=True) -
                              dlnorm(r_prev, mu=prior_mean_log,
-                                    sigmasq=1./prior_prec_log, log=True))
+                                    sigmasq=1. / prior_prec_log, log=True))
     # Add the beta prior on p
     log_target_ratio += (dbeta(p_prop, a=prior_a, b=prior_b, log=True) -
                          dbeta(p_prev, a=prior_a, b=prior_b, log=True))
@@ -471,17 +476,18 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     # matrices, so the resulting Jacobian terms cancel. We are left to
     # contend with the z's and the Jacobian terms resulting from the
     # exponential and logit transformations.
-    log_prop_ratio = -np.sum(np.log(1. + z_prop**2/propDf)-
-                             np.log(1. + z_prev**2 /propDf))
-    log_prop_ratio *= (propDf+1.)/2.
+    log_prop_ratio = -np.sum(np.log(1. + z_prop ** 2 / propDf) -
+                             np.log(1. + z_prev ** 2 / propDf))
+    log_prop_ratio *= (propDf + 1.) / 2.
     log_prop_ratio += -(np.log(r_prop) - np.log(r_prev))
-    log_prop_ratio += -(np.log(p_prop) + np.log(1.-p_prop)
-                        -np.log(p_prev) - np.log(1.-p_prev))
+    log_prop_ratio += -(np.log(p_prop) + np.log(1. - p_prop)
+                        - np.log(p_prev) - np.log(1. - p_prev))
 
     # Execute MH update
     return mh_update(prop=(r_prop, p_prop), prev=(r_prev, p_prev),
                      log_target_ratio=log_target_ratio,
                      log_prop_ratio=log_prop_ratio)
+
 
 def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
                         MPIROOT=0, **kwargs):
@@ -509,12 +515,11 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
     comm.Reduce([approx, MPI.DOUBLE], None,
                 op=MPI.SUM, root=MPIROOT)
 
-
     # Receive settings for refinement
     settings = np.zeros(2, dtype=int)
     comm.Bcast([settings, MPI.INT], root=MPIROOT)
     n_iter, final_info = settings
-    
+
     # Newton-Raphson iterations for refinement of approximation
     for i in xrange(n_iter):
         # Receive updated estimate from master
@@ -526,17 +531,17 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
         weights = w * family.weights(mu)
         dmu_deta = family.link.deriv(eta)
         sqrt_W_X = (X.T * np.sqrt(weights)).T
-        
+
         grad = np.dot(X.T, weights / dmu_deta * (y - mu))
         info = np.dot(sqrt_W_X.T, sqrt_W_X)
-        
+
         # Condense update to a single vector for reduction
         update = np.r_[grad, info[np.tril_indices(2)]]
 
         # Combine with other updates on master
         comm.Reduce([update, MPI.DOUBLE], None,
                     op=MPI.SUM, root=MPIROOT)
-    
+
     # Contribute to final information matrix refinement if requested
     if final_info:
         # Receive updated estimate
@@ -547,13 +552,12 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
         mu = family.link.inv(eta)
         weights = w * family.weights(mu)
         sqrt_W_X = (X.T * np.sqrt(weights)).T
-        
+
         info = np.dot(sqrt_W_X.T, sqrt_W_X)
-        
+
         # Combine informations on master
         comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
                     op=MPI.SUM, root=MPIROOT)
-
 
     # Obtain proposed value of coefficients from master.
     b_prop = np.empty(p)
@@ -572,10 +576,11 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
 
     # Reduce log-target ratio for MH step on master.
     comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
-                 op=MPI.SUM, root=MPIROOT)
+                op=MPI.SUM, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
+
 
 def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.,
                         n_iter_refine=2, final_info_refine=1):
@@ -603,20 +608,19 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.,
     # workers.
     b_hat, prec = posterior_approx_distributed(comm=comm, dim_param=p,
                                                MPIROOT=MPIROOT)
-    
+
     # Refine approximation with single Newton-Raphson step
     b_hat, prec = refine_distributed_approx(comm=comm, est=b_hat, prec=prec,
                                             dim_param=p, n_iter=n_iter_refine,
                                             final_info=final_info_refine,
                                             MPIROOT=MPIROOT)
 
-    
     # Cholesky decompose precision matrix for draws and density calculations
     U = linalg.cholesky(prec, lower=False)
 
     # Propose from linearly-transformed t with appropriate mean and covariance
     z_prop = (np.random.randn(p) /
-              np.sqrt(np.random.gamma(shape=propDf/2., scale=2., size=p) /
+              np.sqrt(np.random.gamma(shape=propDf / 2., scale=2., size=p) /
                       propDf))
     b_prop = b_hat + linalg.solve_triangular(U, z_prop, lower=False)
 
@@ -635,12 +639,13 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.,
 
     # Compute log-ratio of proposal densities. This is very easy with the
     # demeaned and decorrelated values z.
-    log_prop_ratio = -(propDf+1.)/2.*np.sum(np.log(1. + z_prop**2 / propDf) -
-                                            np.log(1. + z_prev**2 / propDf))
+    log_prop_ratio = -(propDf + 1.) / 2. * np.sum(np.log(1. + z_prop ** 2 / propDf) -
+                                                  np.log(1. + z_prev ** 2 / propDf))
 
     return mh_update(prop=b_prop, prev=b_prev,
                      log_target_ratio=log_target_ratio,
                      log_prop_ratio=log_prop_ratio)
+
 
 def rgibbs_worker_p_rnd_cen(comm, n_rnd_cen, n_states, MPIROOT=0):
     '''
@@ -660,6 +665,7 @@ def rgibbs_worker_p_rnd_cen(comm, n_rnd_cen, n_states, MPIROOT=0):
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
 
+
 def rgibbs_master_p_rnd_cen(comm, MPIROOT=0, prior_a=1., prior_b=1.):
     '''
     Master component of Gibbs update for p_rnd_cen given all other parameters.
@@ -676,7 +682,6 @@ def rgibbs_master_p_rnd_cen(comm, MPIROOT=0, prior_a=1., prior_b=1.):
     n_rnd_cen = n[0]
     n_states = n[1]
 
-    p_rnd_cen = np.random.beta(a=n_rnd_cen+prior_a,
-                               b=n_states-n_rnd_cen+prior_b)
+    p_rnd_cen = np.random.beta(a=n_rnd_cen + prior_a,
+                               b=n_states - n_rnd_cen + prior_b)
     return p_rnd_cen
-
