@@ -89,7 +89,6 @@ def build_grid(d, grid_radius=1., grid_transform=None, grid_min_spacing=0.5,
 
   return grid
 
-
 def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
                    grid_transform=None, grid_min_spacing=0.5,
                    grid_shape='spherical', f_args=(), f_kwargs={}, cov_args=(),
@@ -108,7 +107,7 @@ def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
   center : d length ndarray
     Center of sampling region for emulator.
   slope_mean : d x d ndarray
-    Optional linear approximation for f(x - center).
+    Optional linear approximation for f(x - center). Must be lower-triangular.
   cov : function
     Covariance function for Gaussian process. Must accept ndarray of distances
     as first argument and return an ndarray of the same dimension.  Called as
@@ -144,11 +143,11 @@ def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
   -------
   A dictionary containing:
     - grid : d x n_grid ndarray
-      The computed grid for approximation
-    - v : n_grid length ndarray
-      Vector for approximation
+      The computed grid for approximation.
+    - v : n_grid x k ndarray
+      Array for approximation.
     - center : d length ndarray
-      Center of emulation region
+      Center of emulation region.
     - slope_mean : d x d ndarray
       Optional slope of linear mean function. Can be None.
   '''
@@ -187,8 +186,8 @@ def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
   v = linalg.solve(C, f_values.T)
 
   # Build output
-  emulator = {'grid' : grid, 'v' : v, 
-        'center' : center, 'slope_mean' : slope_mean}
+  emulator = {'grid' : grid, 'v' : v,
+              'center' : center, 'slope_mean' : slope_mean}
 
   return emulator
 
@@ -215,7 +214,7 @@ def evaluate_emulator(x, emulator, cov, cov_args=(), cov_kwargs={}):
   Returns
   -------
   f_hat : ndarray
-    Array of length m containing estimated values of function.
+    Array of size k x m containing estimated values of function.
   '''
   # Convert x to matrix if needed
   if not type(x) is np.ndarray:
@@ -228,11 +227,14 @@ def evaluate_emulator(x, emulator, cov, cov_args=(), cov_kwargs={}):
   C = cov(C, *cov_args, **cov_kwargs)
 
   # Estimate function values at x
-  f_hat = np.dot(C, emulator['v']).T
+  f_hat = np.dot(emulator['v'].T, C.T)
   
   # Add linear term if needed
   if emulator['slope_mean'] is not None:
     f_hat += np.dot(emulator['slope_mean'], (x.T - emulator['center']).T)
+
+  if x.shape[1] < 2:
+    f_hat = f_hat[:,0]
 
   return f_hat
 
@@ -250,8 +252,8 @@ def evaluate_emulator_nogrid(x, v, center, cov, slope_mean=None, grid_radius=1.,
   x : ndarray
     Array of length d or of dimension d x m, with each column containing a point
     at which to evaluate the emulator.
-  v : n_grid length ndarray
-    Vector for approximation.
+  - v : n_grid x k ndarray
+    Matrix for approximation.
   center : d length ndarray
     Center of emulation region.
   cov : function
