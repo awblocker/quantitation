@@ -310,3 +310,57 @@ def evaluate_emulator_nogrid(x, v, center, cov, slope_mean=None, grid_radius=1.,
 
   return f_hat
 
+def aggregate_emulators(emulators):
+  '''
+  Aggregate list or tuple of emulators into a single emulator for their sum.
+
+  Arguments
+  ---------
+  emulators : list-like
+    List-like collection of emulators
+
+  Returns
+  -------
+  emulator : dict
+    A dictionary for the combined emulator containing
+    - grid : d x n_grid ndarray
+      The computed grid for approximation.
+    - v : n_grid x k ndarray
+      Array for approximation.
+    - center : d length ndarray
+      Center of emulation region.
+    - slope_mean : d x d ndarray
+      Optional slope of linear mean function. Can be None.
+  '''
+  # Get dimensions
+  d = np.size(emulators[0]['center'])
+  k = np.shape(emulators[0]['v'])[1]
+  n_grids = np.array([emulator['grid'].shape[0] for emulator in emulators],
+                     dtype=int)
+  n_grid_agg = np.sum(n_grids)
+  
+  # Allocate arrays for combined emulator
+  v_agg = np.empty((n_grid_agg, k))
+  grid_agg = np.empty((n_grid_agg, d))
+  center_agg = np.zeros(d)
+  slope_mean_agg = np.zeros((d, d))
+
+  # Iterate over emulators
+  start = 0
+  for i, emulator in enumerate(emulators):
+    v_agg[start:start + n_grids[i], :] = emulator['v']
+    grid_agg[start:start + n_grids[i], :] = emulator['grid']
+    start += n_grids[i]
+
+    if emulator['slope_mean'] is not None:
+      slope_mean_agg += emulator['slope_mean']
+      center_agg += np.dot(emulator['slope_mean'], emulator['center'])
+  
+  if np.max(np.abs(slope_mean_agg)) > 0:
+    center_agg = linalg.solve_triangular(slope_mean_agg, center_agg, lower=True)
+
+  emulator = {'grid' : grid_agg, 'v' : v_agg,
+              'center' : center_agg, 'slope_mean' : slope_mean_agg}
+
+  return emulator
+
