@@ -304,6 +304,9 @@ def evaluate_emulator_nogrid(x, v, center, cov, slope_mean=None, grid_radius=1.,
   # Add linear term if needed
   if slope_mean is not None:
     f_hat += np.dot(slope_mean, (x.T - slope_mean).T)
+  
+  if x.shape[1] < 2:
+    f_hat = f_hat[:,0]
 
   return f_hat
 
