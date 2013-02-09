@@ -622,28 +622,8 @@ def worker(comm, rank, data, cfg):
                                           weights=rss_by_state,
                                           minlength=n_proteins)
             sigmasq_draws[t] = updates_serial.rgibbs_variances(
-                rss=rss_by_protein,
-                                                n=n_states_per_protein,
-                                                prior_shape=shape_sigmasq,
-                                                prior_rate=rate_sigmasq)
-            # bad = (~np.isfinite(sigmasq_draws[t]))
-            # if np.sum(bad) > 0:
-            #    bad_peptides = np.where(np.in1d(mapping_peptides,
-            #                                    np.where(bad)[0]))[0]
-            #    print '-'*80
-            #    print ('Bad protein IDs',
-            #           data['proteins_worker'][np.where(bad)[0]])
-            #    print 'nStates', n_states_per_protein[bad]
-            #    print 'nPeptides', n_peptides_per_protein[bad]
-            #    print 'RSS', rss_by_protein[bad]
-            #    print 'Shape, rate', shape_sigmasq, rate_sigmasq
-            #    print 'mu', mu_draws[t][bad]
-            #    print 'mean gamma', mean_gamma_by_protein[bad]
-            #    print ('Obs intensity per peptide',
-            #           total_intensity_obs_per_peptide[bad_peptides])
-            #    print ('Cen intensity per peptide',
-            #           total_intensity_cen_per_peptide[bad_peptides])
-            #    print '-'*80
+                rss=rss_by_protein, n=n_states_per_protein,
+                prior_shape=shape_sigmasq, prior_rate=rate_sigmasq)
 
             # Mapping from protein to peptide conditional variances for
             # convenience
@@ -655,10 +635,8 @@ def worker(comm, rank, data, cfg):
             rss_by_protein = np.bincount(mapping_peptides,
                                          weights=rss_by_peptide)
             tausq_draws[t] = updates_serial.rgibbs_variances(
-                rss=rss_by_protein,
-                                                  n=n_peptides_per_protein,
-                                                  prior_shape=shape_tausq,
-                                                  prior_rate=rate_tausq)
+                rss=rss_by_protein, n=n_peptides_per_protein,
+                prior_shape=shape_tausq, prior_rate=rate_tausq)
         elif task == TAGS['SIGMA']:
             # Run distributed MH step for sigmasq hyperparameters
             updates_parallel.rmh_worker_variance_hyperparams(
