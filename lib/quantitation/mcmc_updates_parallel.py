@@ -12,13 +12,7 @@ import emulate
 # Specialized sampling routines for parallel implementation
 #==============================================================================
 
-def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
-                                    MPIROOT=0,
-                                    prior_mean_log=2.65,
-                                    prior_prec_log=1. / 0.652 ** 2,
-                                    prior_shape=1., prior_rate=0.,
-                                    brent_scale=6., fallback_upper=10000.,
-                                    correct_prior=False):
+def rmh_worker_variance_hyperparams(comm, variances, MPIROOT=0,):
     '''
     Worker side of Metropolis-Hastings step for variance hyperparameters given
     all other parameters.
@@ -30,72 +24,20 @@ def rmh_worker_variance_hyperparams(comm, variances, shape_prev, rate_prev,
     Proposing from normal approximation to the conditional posterior
     (conditional independence chain). Parameters are log-transformed.
 
-    Builds normal approximation based upon local data, then combines this with
-    others on the master process. These approximations are used to generate a
-    proposal, which is then broadcast back to the workers. The workers then
-    evaluate the log-target ratio and combine these on the master to execute
-    the MH step. The resulting draw is __not__ brought back to the workers until
-    the next synchronization.
+    Compute sufficient statistics locally. These statistics are used to generate
+    a proposal, evaluate the log-target ratio,  and combine these on the master
+    to execute the MH step. The resulting draw is __not__ brought back to the
+    workers until the next synchronization.
 
     Returns None.
     '''
-    # Correct / adjust prior for distributed approximation, if requested
-    adj = 1.
-    if correct_prior:
-        adj = comm.Get_size() - 1.
-
-    # Compute posterior mode for shape and rate using profile log-posterior
+    # Sufficient statistics are (sum 1/variances, sum log 1/variances, and n)
     precisions = 1. / variances
+    T = np.array([np.sum(precisions), np.sum(np.log(precisions)),
+                  np.size(precisions)])
 
-    shape_hat, rate_hat = map_estimator_gamma(x=precisions, log=True,
-                                              prior_shape=prior_shape,
-                                              prior_rate=prior_rate,
-                                              prior_mean_log=prior_mean_log,
-                                              prior_prec_log=prior_prec_log,
-                                              prior_adj=adj,
-                                              brent_scale=brent_scale,
-                                              fallback_upper=fallback_upper)
-
-    # Propose using a bivariate normal approximate to the joint conditional
-    # posterior of (shape, rate)
-
-    # Compute posterior information matrix for parameters
-    info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
-                                x=precisions, log=True,
-                                prior_shape=prior_shape,
-                                prior_rate=prior_rate,
-                                prior_mean_log=prior_mean_log,
-                                prior_prec_log=prior_prec_log,
-                                prior_adj=adj)
-
-    # Compute information-weighted point estimate
-    theta_hat = np.log(np.array([shape_hat, rate_hat]))
-    z_hat = np.dot(info, theta_hat)
-
-    # Condense approximation to a single vector for reduction
-    approx = np.r_[z_hat, info[np.tril_indices(2)]]
-
-    # Combine with other approximations on master.
-    comm.Reduce([approx, MPI.DOUBLE], None,
-                op=MPI.SUM, root=MPIROOT)
-
-    # Obtain proposed value of theta from master.
-    theta_prop = np.empty(2)
-    comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
-    shape_prop, rate_prop = np.exp(theta_prop)
-
-    # Compute log-ratio of target densities, omitting prior.
-    # Log-ratio of prior densities is handled on the master.
-
-    # Only component is the likelihood for the precisions
-    log_target_ratio = np.sum(dgamma(precisions, shape=shape_prop,
-                                     rate=rate_prop, log=True) -
-                              dgamma(precisions, shape=shape_prev,
-                                     rate=rate_prev, log=True))
-
-    # Reduce log-target ratio for MH step on master.
-    comm.Reduce([np.array(log_target_ratio), MPI.DOUBLE], None,
-                op=MPI.SUM, root=MPIROOT)
+    # Combine these via reduction step
+    comm.Reduce([T, MPI.DOUBLE], None, root=MPIROOT)
 
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
@@ -105,6 +47,7 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
                                     prior_mean_log=2.65,
                                     prior_prec_log=1. / 0.652 ** 2,
                                     prior_shape=1., prior_rate=0.,
+                                    brent_scale=6., fallback_upper=1e4,
                                     propDf=5.):
     '''
     Master side of Metropolis-Hastings step for variance hyperparameters given
@@ -131,12 +74,33 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     # Aggregating local results from workers.
     # This assumes that rmh_worker_nbinom_hyperparams() has been called on all
     # workers.
-    theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
-                                                   MPIROOT=MPIROOT)
+    T, buf = np.zeros((2, 3))
+    comm.Reduce(buf, T, root=MPIROOT)
+    n = T[2]
+
+    shape_hat, rate_hat = map_estimator_gamma(x=None, T=T, log=True,
+                                              prior_shape=prior_shape,
+                                              prior_rate=prior_rate,
+                                              prior_mean_log=prior_mean_log,
+                                              prior_prec_log=prior_prec_log,
+                                              brent_scale=brent_scale,
+                                              fallback_upper=fallback_upper)
+    theta_hat = np.log(np.array([shape_hat, rate_hat]))
+
+    # Propose using a bivariate normal approximate to the joint conditional
+    # posterior of (shape, rate)
+
+    # Compute posterior information matrix for parameters
+    info = info_posterior_gamma(shape=shape_hat, rate=rate_hat,
+                                x=None, T=T, log=True,
+                                prior_shape=prior_shape,
+                                prior_rate=prior_rate,
+                                prior_mean_log=prior_mean_log,
+                                prior_prec_log=prior_prec_log)
 
     # Cholesky decompose information matrix for bivariate draw and
     # density calculations
-    U = linalg.cholesky(prec, lower=False)
+    U = linalg.cholesky(info, lower=False)
 
     # Propose shape and rate parameter jointly
     z_prop = (np.random.randn(2) /
@@ -149,15 +113,13 @@ def rmh_master_variance_hyperparams(comm, shape_prev, rate_prev, MPIROOT=0,
     theta_prev = np.log(np.array([shape_prev, rate_prev]))
     z_prev = np.dot(U, theta_prev - theta_hat)
 
-    # Broadcast theta_prop to workers
-    comm.Bcast([theta_prop, MPI.DOUBLE], root=MPIROOT)
-
     # Compute log-ratio of target densities.
-    # Start by obtaining likelihood component from workers.
-    log_target_ratio = np.array(0.)
-    buf = np.array(0.)
-    comm.Reduce([buf, MPI.DOUBLE], [log_target_ratio, MPI.DOUBLE],
-                op=MPI.SUM, root=MPIROOT)
+    log_target_ratio = \
+            - n * (special.gammaln(shape_prop) - special.gammaln(shape_prev)) \
+            + n * (shape_prop * np.log(rate_prop) - shape_prev *
+                   np.log(rate_prev)) \
+            + (shape_prop - shape_prev) * T[1] \
+            - (rate_prop - rate_prev) * T[0]
 
     # Add log-prior ratio
     if prior_prec_log > 0:

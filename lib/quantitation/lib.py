@@ -248,7 +248,7 @@ def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat,
     return deriv
 
 
-def score_profile_posterior_gamma(shape, x, log=False,
+def score_profile_posterior_gamma(shape, x, T=None, log=False,
                                   prior_shape=1., prior_rate=0.,
                                   prior_mean_log=0., prior_prec_log=0.,
                                   prior_adj=1.):
@@ -262,16 +262,21 @@ def score_profile_posterior_gamma(shape, x, log=False,
 
     Returns a float with the desired score.
     '''
+    # Extract sufficient statistics if needed
+    if T is None:
+        # Sufficient statistics are (sum x, sum log x, and n)
+        T = np.array([np.sum(x), np.sum(np.log(x)), np.size(x)])
+
+    n = T[2]
+
     # Compute conditional posterior mode of rate parameter
-    n = np.size(x)
     rate_hat = ((shape + (prior_shape - 1. + log) / n / prior_adj) /
-                (np.mean(x) + prior_rate / n / prior_adj))
+                (T[0]/n + prior_rate / n / prior_adj))
 
     # Compute score for untransformed shape parameter
-    score = (np.sum(np.log(x)) - n * special.polygamma(0, shape) +
-             n * np.log(rate_hat) -
-             prior_prec_log * (np.log(shape) - prior_mean_log) / shape / prior_adj -
-             1. / shape / prior_adj)
+    score = (T[1] - n * special.polygamma(0, shape) + n * np.log(rate_hat) -
+             prior_prec_log * (np.log(shape) - prior_mean_log) / shape /
+             prior_adj - 1. / shape / prior_adj)
 
     # Handle log transformation of parameters via simple chain rule
     if log:
@@ -287,7 +292,7 @@ def score_profile_posterior_gamma(shape, x, log=False,
     return score
 
 
-def info_posterior_gamma(shape, rate, x, log=False,
+def info_posterior_gamma(shape, rate, x, T=None, log=False,
                          prior_shape=1., prior_rate=0.,
                          prior_mean_log=0., prior_prec_log=0.,
                          prior_adj=1.):
@@ -305,8 +310,13 @@ def info_posterior_gamma(shape, rate, x, log=False,
     Returns a 2x2 np.ndarray for which the first {row,column} corresponds to the
     shape parameter and the second corresponds to the rate parameter.
     '''
+    # Extract sufficient statistics if needed
+    if T is None:
+        # Sufficient statistics are (sum x, sum log x, and n)
+        T = np.array([np.sum(x), np.sum(np.log(x)), np.size(x)])
+
+    n = T[2]
     # Compute observed information for untransformed parameters
-    n = np.size(x)
     info = np.zeros((2, 2))
 
     # shape, shape
@@ -327,11 +337,11 @@ def info_posterior_gamma(shape, rate, x, log=False,
 
         # Compute gradient for log-likelihood wrt untransformed parameters
         grad = np.array([-n * np.log(rate) + n * special.polygamma(0, shape) -
-                         np.sum(np.log(x)) + prior_prec_log / prior_adj *
+                         T[1] + prior_prec_log / prior_adj *
                          (np.log(shape) - prior_mean_log) / shape + 1. / shape -
                          log * 1. / shape,
                          -(n * shape + (prior_shape - 1.) / prior_adj) / rate +
-                         np.sum(x) + prior_rate / prior_adj - log * 1. / rate])
+                         T[0] + prior_rate / prior_adj - log * 1. / rate])
 
         # Compute derivatives of untransformed parameters wrt transformed ones
         deriv = np.array([shape, rate])
@@ -715,7 +725,7 @@ def laplace_approx(f, xhat, info, f_args=tuple(), f_kwargs={}):
 #==============================================================================
 
 
-def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
+def map_estimator_gamma(x, T=None, log=False, prior_shape=1., prior_rate=0.,
                         prior_mean_log=0., prior_prec_log=0., prior_adj=1.,
                         brent_scale=6., fallback_upper=10000.):
     '''
@@ -728,8 +738,11 @@ def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
 
     Returns a 2-tuple with the MAP estimators for shape and rate.
     '''
-    # Compute posterior mode for shape and rate using profile log-posterior
-    n = np.size(x)
+    # Extract sufficient statistics if needed
+    if T is None:
+        # Sufficient statistics are (sum 1/variances, sum log 1/variances, and
+        # n)
+        T = np.array([np.sum(x), np.sum(np.log(x)), np.size(x)])
 
     # Set upper bound first
     if prior_prec_log > 0:
@@ -738,8 +751,8 @@ def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
         upper = fallback_upper
 
     # Verify that score is negative at upper bound
-    args = (x, log, prior_shape, prior_rate, prior_mean_log, prior_prec_log,
-            prior_adj)
+    args = (None, T, log, prior_shape, prior_rate, prior_mean_log,
+            prior_prec_log, prior_adj)
     while score_profile_posterior_gamma(upper, *args) > 0:
         upper *= 2.
 
@@ -749,8 +762,8 @@ def map_estimator_gamma(x, log=False, prior_shape=1., prior_rate=0.,
                                 args=args)
 
     # Compute posterior mode of rate
-    rate_hat = ((shape_hat + (prior_shape - 1. + log) / prior_adj / n) /
-                (np.mean(x) + prior_rate / prior_adj / n))
+    rate_hat = ((shape_hat + (prior_shape - 1. + log) / prior_adj / T[2]) /
+                (T[0] / T[2] + prior_rate / prior_adj / T[2]))
 
     return (shape_hat, rate_hat)
 

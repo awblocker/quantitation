@@ -197,12 +197,10 @@ def rmh_variance_hyperparams(variances, shape_prev, rate_prev,
         # posterior for rate.
 
         # Compute proposal variance
-        var_prop = 1. / info_profile_posterior_gamma(shape=shape_hat,
-                                                     x=precisions, log=True,
-                                                     prior_shape=prior_shape,
-                                                     prior_rate=prior_rate,
-                                                     prior_mean_log=prior_mean_log,
-                                                     prior_prec_log=prior_prec_log)
+        var_prop = 1. / info_profile_posterior_gamma(
+            shape=shape_hat, x=precisions, log=True, prior_shape=prior_shape,
+            prior_rate=prior_rate, prior_mean_log=prior_mean_log,
+            prior_prec_log=prior_prec_log)
 
         # Propose shape parameter from log-t
         z_prop = (np.random.randn(1) /

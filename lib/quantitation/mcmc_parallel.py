@@ -661,20 +661,12 @@ def worker(comm, rank, data, cfg):
                                                   prior_rate=rate_tausq)
         elif task == TAGS['SIGMA']:
             # Run distributed MH step for sigmasq hyperparameters
-            updates_parallel.rmh_worker_variance_hyperparams(comm=comm,
-                                                variances=sigmasq_draws[t],
-                                                shape_prev=shape_sigmasq,
-                                                rate_prev=rate_sigmasq,
-                                                MPIROOT=MPIROOT,
-                                                **cfg['priors']['sigmasq_dist'])
+            updates_parallel.rmh_worker_variance_hyperparams(
+                comm=comm, variances=sigmasq_draws[t], MPIROOT=MPIROOT)
         elif task == TAGS['TAU']:
             # Run distributed MH step for sigmasq hyperparameters
-            updates_parallel.rmh_worker_variance_hyperparams(comm=comm,
-                                                variances=tausq_draws[t],
-                                                shape_prev=shape_tausq,
-                                                rate_prev=rate_tausq,
-                                                MPIROOT=MPIROOT,
-                                                **cfg['priors']['tausq_dist'])
+            updates_parallel.rmh_worker_variance_hyperparams(
+                comm=comm, variances=tausq_draws[t], MPIROOT=MPIROOT)
         elif task == TAGS['NSTATES']:
             # Run distributed MH step for n_states hyperparameters
             updates_parallel.rmh_worker_nbinom_hyperparams(comm=comm,
