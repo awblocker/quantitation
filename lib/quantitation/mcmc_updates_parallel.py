@@ -357,7 +357,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
         emulator = emulate.build_emulator(
             glm.score, center=b_hat, slope_mean=L, cov=cov,
             grid_min_spacing=grid_min_spacing, grid_radius=grid_radius,
-            f_kwargs={'y' : y, 'X' : X, 'family' : family})
+            f_kwargs={'y' : y, 'X' : X, 'w' : w, 'family' : family})
         
         # Send emulator to master node
         emulate.aggregate_emulators_mpi(
@@ -464,7 +464,9 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5., method='emulate',
     if method=='emulate':
         # Gather emulators from workers
         emulator = emulate.aggregate_emulators_mpi(
-            comm=comm, emulator=None, MPIROOT=0)
+            comm=comm, emulator=None, MPIROOT=MPIROOT,
+            info=lambda e: linalg.cho_solve((e['slope_mean'], True),
+                                            np.eye(e['slope_mean'].shape[0])))
 
         # Find root of combined approximate score function
         b_hat = emulator['center']
@@ -473,8 +475,7 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5., method='emulate',
 
         # Compute Cholesky decomposition of approximate combined information
         # for proposal
-        U = linalg.solve_triangular(emulator['slope_mean'], np.eye(p),
-                                    lower=True).T
+        U = linalg.cholesky(emulator['info'], lower=False)
     else:
         # Build normal approximation to posterior of transformed hyperparameters.
         # Aggregating local results from workers.
@@ -512,8 +513,9 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5., method='emulate',
 
     # Compute log-ratio of proposal densities. This is very easy with the
     # demeaned and decorrelated values z.
-    log_prop_ratio = -(propDf + 1.) / 2. * np.sum(np.log(1. + z_prop ** 2 / propDf) -
-                                                  np.log(1. + z_prev ** 2 / propDf))
+    log_prop_ratio = -(propDf + 1.) / 2. * \
+            np.sum(np.log(1. + z_prop ** 2 / propDf) - \
+                   np.log(1. + z_prev ** 2 / propDf))
 
     return mh_update(prop=b_prop, prev=b_prev,
                      log_target_ratio=log_target_ratio,
