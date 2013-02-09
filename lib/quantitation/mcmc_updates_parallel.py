@@ -160,7 +160,9 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                                   prior_prec_log=1. / 0.652 ** 2,
                                   prior_a=1., prior_b=1.,
                                   brent_scale=6., fallback_upper=10000.,
-                                  correct_prior=True):
+                                  correct_prior=True, method='emulate',
+                                  coverage_prob=0.999,
+                                  grid_min_spacing=0.5, cov=emulate.cov_sqexp):
     '''
     Worker side of Metropolis-Hastings step for negative-binomial
     hyperparameters given all other parameters.
@@ -184,36 +186,94 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
     adj = 1.
     if correct_prior:
         adj = comm.Get_size() - 1.
+    
+    # Setup arguments
+    nbinom_args = dict(x=x, prior_a=prior_a, prior_b=prior_b,
+                       prior_mean_log=prior_mean_log,
+                       prior_prec_log=prior_prec_log, prior_adj=adj)
 
     # Compute posterior mode for r and p using profile log-posterior
-    r_hat, p_hat = map_estimator_nbinom(x=x, transform=True,
-                                        prior_a=prior_a, prior_b=prior_b,
-                                        prior_mean_log=prior_mean_log,
-                                        prior_prec_log=prior_prec_log,
-                                        prior_adj=adj,
+    r_hat, p_hat = map_estimator_nbinom(transform=True,
                                         brent_scale=brent_scale,
-                                        fallback_upper=fallback_upper)
+                                        fallback_upper=fallback_upper,
+                                        **nbinom_args)
 
     # Propose using a bivariate normal approximate to the joint conditional
     # posterior of (r, p)
 
     # Compute posterior information matrix for parameters
-    info = info_posterior_nbinom(r=r_hat, p=p_hat, x=x, transform=True,
-                                 prior_a=prior_a, prior_b=prior_b,
-                                 prior_mean_log=prior_mean_log,
-                                 prior_prec_log=prior_prec_log, prior_adj=adj)
-
-    # Compute information-weighted point estimate
+    info = info_posterior_nbinom(r=r_hat, p=p_hat, transform=True,
+                                 **nbinom_args)
+    
+    # Transform point estimate
     theta_hat = np.log(np.array([r_hat, p_hat]))
     theta_hat[1] -= np.log(1. - p_hat)
-    z_hat = np.dot(info, theta_hat)
 
-    # Condense approximation to a single vector for reduction
-    approx = np.r_[z_hat, info[np.tril_indices(2)]]
+    if method == 'emulate':
+        # Build local emulator for score function
+        grid_radius = emulate.approx_quantile(coverage_prob=coverage_prob,
+                                              d=2, n=adj)
+        L = linalg.solve_triangular(linalg.cholesky(info, lower=True),
+                                    np.eye(2), lower=True)
 
-    # Combine with other approximations on master.
-    comm.Reduce([approx, MPI.DOUBLE], None,
-                op=MPI.SUM, root=MPIROOT)
+        emulator = emulate.build_emulator(
+            score_posterior_nbinom_vec, center=theta_hat, slope_mean=L, cov=cov,
+            grid_min_spacing=grid_min_spacing, grid_radius=grid_radius,
+            f_kwargs=nbinom_args)
+        
+        # Send emulator to master node
+        emulate.aggregate_emulators_mpi(
+            comm=comm, emulator=emulator, MPIROOT=MPIROOT)
+    else:
+        # Build necessary quantities for distributed posterior approximation
+        z_hat = np.dot(info, theta_hat)
+
+        # Condense approximation to a single vector for reduction
+        approx = np.r_[z_hat, I[np.tril_indices(2)]]
+
+        # Combine with other approximations on master.
+        comm.Reduce([approx, MPI.DOUBLE], None,
+                    op=MPI.SUM, root=MPIROOT)
+
+        # Receive settings for refinement
+        settings = np.zeros(2, dtype=int)
+        comm.Bcast([settings, MPI.INT], root=MPIROOT)
+        n_iter, final_info = settings
+
+        # Newton-Raphson iterations for refinement of approximation
+        for i in xrange(n_iter):
+            # Receive updated estimate from master
+            comm.Bcast([theta_hat, MPI.DOUBLE], root=MPIROOT)
+
+            # Compute score and information matrix at combined estimate
+            r_hat = np.exp(theta_hat[0])
+            p_hat = 1. / (1. + np.exp(-theta_hat[1]))
+            grad = score_posterior_nbinom_vec(theta_hat,
+                                              **nbinom_args).flatten()
+            info = info_posterior_nbinom(r=r_hat, p=p_hat, transform=True,
+                                         **nbinom_args)
+            
+
+            # Condense update to a single vector for reduction
+            update = np.r_[grad, info[np.tril_indices(2)]]
+
+            # Combine with other updates on master
+            comm.Reduce([update, MPI.DOUBLE], None,
+                        op=MPI.SUM, root=MPIROOT)
+
+        # Contribute to final information matrix refinement if requested
+        if final_info:
+            # Receive updated estimate
+            comm.Bcast([theta_hat, MPI.DOUBLE], root=MPIROOT)
+            
+            r_hat = np.exp(theta_hat[0])
+            p_hat = 1. / (1 + np.exp(-theta_hat[1]))
+            info = info_posterior_nbinom(r=r_hat, p=p_hat, transform=True,
+                                         **nbinom_args)
+
+            # Combine informations on master
+            comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
+                        op=MPI.SUM, root=MPIROOT)
 
     # Obtain proposed value of theta from master.
     theta_prop = np.empty(2)
@@ -239,8 +299,9 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
 def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
                                   prior_mean_log=2.65,
                                   prior_prec_log=1. / 0.652 ** 2,
-                                  prior_a=1., prior_b=1.,
-                                  propDf=5.):
+                                  prior_a=1., prior_b=1., propDf=5.,
+                                  method='emulate', cov=emulate.cov_sqexp,
+                                  n_iter_refine=2, final_info_refine=1):
     '''
     Master side of Metropolis-Hastings step for negative-binomial
     hyperparameters given all other parameters.
@@ -261,16 +322,36 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     Returns a 2-tuple consisting of the new (shape, rate) and a boolean
     indicating acceptance.
     '''
-    # Build normal approximation to posterior of transformed hyperparameters.
-    # Aggregating local results from workers.
-    # This assumes that rmh_worker_nbinom_hyperparams() has been called on all
-    # workers.
-    theta_hat, prec = posterior_approx_distributed(comm=comm, dim_param=2,
-                                                   MPIROOT=MPIROOT)
+    if method=='emulate':
+        # Gather emulators from workers
+        emulator = emulate.aggregate_emulators_mpi(
+            comm=comm, emulator=None, MPIROOT=MPIROOT,
+            info=lambda e: linalg.cho_solve((e['slope_mean'], True),
+                                            np.eye(e['slope_mean'].shape[0])))
 
-    # Cholesky decompose information matrix for bivariate draw and
-    # density calculations
-    U = linalg.cholesky(prec, lower=False)
+        # Find root of combined approximate score function
+        theta_hat = emulator['center']
+        theta_hat = optimize.fsolve(
+            func=emulate.evaluate_emulator, x0=theta_hat, args=(emulator, cov))
+
+        # Compute Cholesky decomposition of approximate combined information
+        # for proposal
+        U = linalg.cholesky(emulator['info'], lower=False)
+    else:
+        # Build normal approximation to posterior of transformed hyperparameters.
+        # Aggregating local results from workers.
+        # This assumes that rmh_worker_nbinom_glm_coef() has been called on all
+        # workers.
+        theta_hat, prec = posterior_approx_distributed(
+            comm=comm, dim_param=p, MPIROOT=MPIROOT)
+
+        # Refine approximation with single Newton-Raphson step
+        theta_hat, prec = refine_distributed_approx(
+            comm=comm, est=theta_hat, prec=prec, dim_param=p,
+            n_iter=n_iter_refine, final_info=final_info_refine, MPIROOT=MPIROOT)
+
+        # Cholesky decompose precision matrix for draws and density calculations
+        U = linalg.cholesky(prec, lower=False)
 
     # Propose r and p jointly
     z_prop = (np.random.randn(2) /

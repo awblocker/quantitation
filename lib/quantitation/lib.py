@@ -446,6 +446,43 @@ def score_profile_posterior_nbinom(r, x, transform=False,
     return score
 
 
+def score_posterior_nbinom_vec(theta, x, prior_a=1., prior_b=1.,
+                               prior_mean_log=0., prior_prec_log=0.,
+                               prior_adj=1.):
+    '''
+    Posterior score for theta = (log r, logit p) parameter of
+    negative-binomial distribution.
+
+    Assumes a conditionally conjugate beta prior on p and an independent
+    log-normal prior on r, each with the given parameters.
+
+    The entire log-prior is divided by prior_adj. This is useful for
+    constructing distributed approximations.
+
+    Returns a 2 x m ndarray with the requested score.
+    '''
+    n = np.size(x)
+    if len(np.shape(theta)) < 2:
+        theta = theta[:, np.newaxis]
+
+    r = np.exp(theta[0])
+    p = 1. / (1. + np.exp(-theta[1]))
+
+    # Compute scores
+    xpr = np.ones((theta.shape[1], n)) * x
+    xpr = (xpr.T + r).T
+
+    score = np.zeros_like(theta)
+    score[0] = (np.sum(special.polygamma(0, xpr), 1) - \
+            n * special.polygamma(0, r) + n * np.log(1. - p)) * r + \
+            -prior_prec_log * (np.log(r) - prior_mean_log) / prior_adj
+    score[1] = (-n * r / (1. - p) + np.sum(x) / p + 
+                (prior_a * np.log(p) + prior_b * np.log(1. - p)) /
+                prior_adj) * p * (1. - p)
+
+    return score
+
+
 def info_posterior_nbinom(r, p, x, transform=False, prior_a=1., prior_b=1.,
                           prior_mean_log=0., prior_prec_log=0., prior_adj=1.):
     '''
