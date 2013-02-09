@@ -73,7 +73,7 @@ def main(argv):
         cfg_paths = args[::2]
         list_n_workers = [int(x) for x in args[1::2]]
     else:
-        print >> sys.stderr, ("Error -- need path to YAML configuration"
+        print >> sys.stderr, ("Error -- need path to YAML configuration "
                               "and n_workers")
         sys.exit(1)
 
