@@ -320,7 +320,7 @@ def evaluate_emulator_nogrid(
     return f_hat
 
 
-def aggregate_emulators(emulators):
+def aggregate_emulators(emulators, **kwargs):
     '''
     Aggregate list or tuple of emulators into a single emulator for their sum.
 
@@ -328,6 +328,10 @@ def aggregate_emulators(emulators):
     ---------
     emulators : list-like
       List-like collection of emulators
+    **kwargs
+      Additional aggregations to compute. These should be functions taking a
+      single emulator as an argument. Each is applied to each entry of the
+      emulator and summed.
 
     Returns
     -------
@@ -355,6 +359,10 @@ def aggregate_emulators(emulators):
     center_agg = np.zeros(d)
     slope_mean_agg = np.zeros((d, d))
 
+    # Allocate arrays for additional aggregations
+    if len(kwargs) > 0:
+        aggs = dict(zip(kwargs.keys(), np.zeros(len(kwargs))))
+
     # Iterate over emulators
     start = 0
     for i, emulator in enumerate(emulators):
@@ -366,6 +374,10 @@ def aggregate_emulators(emulators):
             slope_mean_agg += emulator['slope_mean']
             center_agg += np.dot(emulator['slope_mean'], emulator['center'])
 
+        if len(kwargs) > 0:
+            for k in aggs:
+                aggs[k] += kwargs[k](emulator)
+
     if np.max(np.abs(slope_mean_agg)) > 0:
         center_agg = linalg.solve_triangular(
             slope_mean_agg, center_agg, lower=True)
@@ -373,10 +385,13 @@ def aggregate_emulators(emulators):
     emulator = {'grid': grid_agg, 'v': v_agg,
                 'center': center_agg, 'slope_mean': slope_mean_agg}
 
+    if len(kwargs) > 0:
+        emulator.update(aggs)
+
     return emulator
 
 
-def aggregate_emulators_mpi(comm, emulator=None, MPIROOT=0):
+def aggregate_emulators_mpi(comm, emulator=None, MPIROOT=0, **kwargs):
     '''
     Aggregate emulators from workers into a single emulator for their sum via
     MPI gather operation (serialized).
@@ -389,6 +404,10 @@ def aggregate_emulators_mpi(comm, emulator=None, MPIROOT=0):
         Dictionary as output by build_emulator containing grid and v.
     MPIROOT : int
         Rank of root MPI process.
+    **kwargs
+      Additional aggregations to compute. These should be functions taking a
+      single emulator as an argument. Each is applied to each entry of the
+      emulator and summed.
 
     Returns
     -------
@@ -414,7 +433,7 @@ def aggregate_emulators_mpi(comm, emulator=None, MPIROOT=0):
         # Gather entire emulators from individual nodes
         emulator_list = comm.gather(None, root=MPIROOT)[1:]
 
-        return aggregate_emulators(emulator_list)
+        return aggregate_emulators(emulator_list, **kwargs)
     else:
         # Worker node process
         # Send emulator to aggregator
