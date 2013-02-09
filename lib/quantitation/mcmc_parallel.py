@@ -696,7 +696,8 @@ def worker(comm, rank, data, cfg):
             y[:n_obs_states] = 1.
 
             # Estimate GLM parameters.
-            fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True)
+            fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True,
+                              cov=True)
 
             # Handle distributed computation draw
             updates_parallel.rmh_worker_glm_coef(
