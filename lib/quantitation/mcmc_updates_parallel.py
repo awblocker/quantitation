@@ -1,8 +1,12 @@
 from mpi4py import MPI
+from scipy import optimize
+
+import glm
 
 from lib import *
 from mcmc_updates_serial import mh_update
 from fisher_weighting import *
+import emulate
 
 #==============================================================================
 # Specialized sampling routines for parallel implementation
@@ -358,8 +362,9 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
                      log_prop_ratio=log_prop_ratio)
 
 
-def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
-                        MPIROOT=0, **kwargs):
+def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
+                        method='emulate', MPIROOT=0, coverage_prob=0.999,
+                        grid_min_spacing=0.5, cov=emulate.cov_sqexp, **kwargs):
     '''
     Worker component of single Metropolis-Hastings step for GLM coefficients
     using a normal approximation to their posterior distribution. Proposes
@@ -371,62 +376,84 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
 
     Returns None.
     '''
+    # Get number of workers
+    n_workers = comm.Get_size() - 1
+
     # Get dimensions
     p = X.shape[1]
+    
+    if method == 'emulate':
+        # Build local emulator for score function
+        grid_radius = emulate.approx_quantile(coverage_prob=coverage_prob,
+                                              d=p, n=n_workers)
+        if V is None:
+            L = linalg.solve_triangular(linalg.cholesky(I, lower=True),
+                                        np.eye(p), lower=True)
+        else:
+            L = linalg.cholesky(V, lower=True)
 
-    # Build necessary quantities for distributed posterior approximation
-    z_hat = np.dot(I, b_hat)
+        emulator = emulate.build_emulator(
+            glm.score, center=b_hat, slope_mean=L, cov=cov,
+            grid_min_spacing=grid_min_spacing, grid_radius=grid_radius,
+            f_kwargs={'y' : y, 'X' : X, 'family' : family})
+        
+        # Send emulator to master node
+        emulate.aggregate_emulators_mpi(
+            comm=comm, emulator=emulator, MPIROOT=MPIROOT)
+    else:
+        # Build necessary quantities for distributed posterior approximation
+        z_hat = np.dot(I, b_hat)
 
-    # Condense approximation to a single vector for reduction
-    approx = np.r_[z_hat, I[np.tril_indices(2)]]
+        # Condense approximation to a single vector for reduction
+        approx = np.r_[z_hat, I[np.tril_indices(2)]]
 
-    # Combine with other approximations on master.
-    comm.Reduce([approx, MPI.DOUBLE], None,
-                op=MPI.SUM, root=MPIROOT)
-
-    # Receive settings for refinement
-    settings = np.zeros(2, dtype=int)
-    comm.Bcast([settings, MPI.INT], root=MPIROOT)
-    n_iter, final_info = settings
-
-    # Newton-Raphson iterations for refinement of approximation
-    for i in xrange(n_iter):
-        # Receive updated estimate from master
-        comm.Bcast([b_hat, MPI.DOUBLE], root=MPIROOT)
-
-        # Compute score and information matrix at combined estimate
-        eta = np.dot(X, b_hat)
-        mu = family.link.inv(eta)
-        weights = w * family.weights(mu)
-        dmu_deta = family.link.deriv(eta)
-        sqrt_W_X = (X.T * np.sqrt(weights)).T
-
-        grad = np.dot(X.T, weights / dmu_deta * (y - mu))
-        info = np.dot(sqrt_W_X.T, sqrt_W_X)
-
-        # Condense update to a single vector for reduction
-        update = np.r_[grad, info[np.tril_indices(2)]]
-
-        # Combine with other updates on master
-        comm.Reduce([update, MPI.DOUBLE], None,
+        # Combine with other approximations on master.
+        comm.Reduce([approx, MPI.DOUBLE], None,
                     op=MPI.SUM, root=MPIROOT)
 
-    # Contribute to final information matrix refinement if requested
-    if final_info:
-        # Receive updated estimate
-        comm.Bcast([b_hat, MPI.DOUBLE], root=MPIROOT)
+        # Receive settings for refinement
+        settings = np.zeros(2, dtype=int)
+        comm.Bcast([settings, MPI.INT], root=MPIROOT)
+        n_iter, final_info = settings
 
-        # Update information matrix
-        eta = np.dot(X, b_hat)
-        mu = family.link.inv(eta)
-        weights = w * family.weights(mu)
-        sqrt_W_X = (X.T * np.sqrt(weights)).T
+        # Newton-Raphson iterations for refinement of approximation
+        for i in xrange(n_iter):
+            # Receive updated estimate from master
+            comm.Bcast([b_hat, MPI.DOUBLE], root=MPIROOT)
 
-        info = np.dot(sqrt_W_X.T, sqrt_W_X)
+            # Compute score and information matrix at combined estimate
+            eta = np.dot(X, b_hat)
+            mu = family.link.inv(eta)
+            weights = w * family.weights(mu)
+            dmu_deta = family.link.deriv(eta)
+            sqrt_W_X = (X.T * np.sqrt(weights)).T
 
-        # Combine informations on master
-        comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
-                    op=MPI.SUM, root=MPIROOT)
+            grad = np.dot(X.T, weights / dmu_deta * (y - mu))
+            info = np.dot(sqrt_W_X.T, sqrt_W_X)
+
+            # Condense update to a single vector for reduction
+            update = np.r_[grad, info[np.tril_indices(2)]]
+
+            # Combine with other updates on master
+            comm.Reduce([update, MPI.DOUBLE], None,
+                        op=MPI.SUM, root=MPIROOT)
+
+        # Contribute to final information matrix refinement if requested
+        if final_info:
+            # Receive updated estimate
+            comm.Bcast([b_hat, MPI.DOUBLE], root=MPIROOT)
+
+            # Update information matrix
+            eta = np.dot(X, b_hat)
+            mu = family.link.inv(eta)
+            weights = w * family.weights(mu)
+            sqrt_W_X = (X.T * np.sqrt(weights)).T
+
+            info = np.dot(sqrt_W_X.T, sqrt_W_X)
+
+            # Combine informations on master
+            comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
+                        op=MPI.SUM, root=MPIROOT)
 
     # Obtain proposed value of coefficients from master.
     b_prop = np.empty(p)
@@ -451,8 +478,9 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1,
     # Synchronization of the resulting draw is handled separately.
 
 
-def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.,
-                        n_iter_refine=2, final_info_refine=1):
+def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5., method='emulate',
+                        cov=emulate.cov_sqexp, n_iter_refine=2,
+                        final_info_refine=1):
     '''
     Master component of single Metropolis-Hastings step for GLM coefficients
     using a normal approximation to their posterior distribution. Proposes
@@ -471,21 +499,35 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5.,
     # Compute dimensions
     p = np.size(b_prev)
 
-    # Build normal approximation to posterior of transformed hyperparameters.
-    # Aggregating local results from workers.
-    # This assumes that rmh_worker_nbinom_glm_coef() has been called on all
-    # workers.
-    b_hat, prec = posterior_approx_distributed(comm=comm, dim_param=p,
-                                               MPIROOT=MPIROOT)
+    if method=='emulate':
+        # Gather emulators from workers
+        emulator = emulate.aggregate_emulators_mpi(
+            comm=comm, emulator=None, MPIROOT=0)
 
-    # Refine approximation with single Newton-Raphson step
-    b_hat, prec = refine_distributed_approx(comm=comm, est=b_hat, prec=prec,
-                                            dim_param=p, n_iter=n_iter_refine,
-                                            final_info=final_info_refine,
-                                            MPIROOT=MPIROOT)
+        # Find root of combined approximate score function
+        b_hat = emulator['center']
+        b_hat = optimize.fsolve(
+            func=emulate.evaluate_emulator, x0=b_hat, args=(emulator, cov))
 
-    # Cholesky decompose precision matrix for draws and density calculations
-    U = linalg.cholesky(prec, lower=False)
+        # Compute Cholesky decomposition of approximate combined information
+        # for proposal
+        U = linalg.solve_triangular(emulator['slope_mean'], np.eye(p),
+                                    lower=True).T
+    else:
+        # Build normal approximation to posterior of transformed hyperparameters.
+        # Aggregating local results from workers.
+        # This assumes that rmh_worker_nbinom_glm_coef() has been called on all
+        # workers.
+        b_hat, prec = posterior_approx_distributed(
+            comm=comm, dim_param=p, MPIROOT=MPIROOT)
+
+        # Refine approximation with single Newton-Raphson step
+        b_hat, prec = refine_distributed_approx(
+            comm=comm, est=b_hat, prec=prec, dim_param=p, n_iter=n_iter_refine,
+            final_info=final_info_refine, MPIROOT=MPIROOT)
+
+        # Cholesky decompose precision matrix for draws and density calculations
+        U = linalg.cholesky(prec, lower=False)
 
     # Propose from linearly-transformed t with appropriate mean and covariance
     z_prop = (np.random.randn(p) /
