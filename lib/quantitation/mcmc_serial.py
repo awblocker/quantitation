@@ -7,7 +7,8 @@ import glm
 import mcmc_updates_serial as updates
 
 
-def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg):
+def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
+                **kwargs):
     '''
     Serial MCMC sampler for posterior of state-level censoring model.
 
