@@ -6,6 +6,8 @@ import copy
 import cPickle
 import gzip
 
+import h5py
+
 import numpy as np
 from scipy import special
 from scipy import optimize
@@ -1288,6 +1290,44 @@ def posterior_stderrors(**kwargs):
 #==============================================================================
 # General-purpose IO functions
 #==============================================================================
+
+def write_to_hdf5(fname, compress='gzip', **kwargs):
+    '''
+    Write **kwargs to HDF5 file fname, potentially with compression.
+
+    Parameters
+    ----------
+        - fname : filename
+        - compress : string or None
+            Compression to use when saving. Can be None, 'gzip', 'lzf', or
+            'szip'.
+    '''
+    # Check input validity
+    if type(fname) is not str:
+        raise TypeError('fname must be a path to a writable file.')
+
+    if compress not in (None, 'gzip', 'lzf', 'szip'):
+        raise ValueError('Invalid value for compress.')
+
+    # Open file
+    out_file = h5py.File(fname, 'w')
+
+    # Write other arguments to file
+    write_args_to_hdf5(hdf5=out_file, compress=compress, **kwargs)
+
+    # Close file used for output
+    out_file.close()
+
+def write_args_to_hdf5(hdf5, compress, **kwargs):
+    for k, v in kwargs.iteritems():
+        if type(v) is dict:
+            d = hdf5.create_group(k)
+            write_args_to_hdf5(d, compress, **v)
+        else:
+            if np.size(v) > 1:
+                hdf5.create_dataset(k, data=v, compression=compress)
+            else:
+                hdf5.create_dataset(k, data=v)
 
 
 def write_to_pickle(fname, compress='bz2', **kwargs):
