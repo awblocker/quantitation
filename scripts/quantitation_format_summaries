@@ -4,10 +4,8 @@
 import sys
 import getopt
 import time
-import cPickle
-import bz2
-import gzip
 
+import h5py
 import yaml
 import numpy as np
 
@@ -79,29 +77,13 @@ def main(argv):
         cfg = yaml.load(cfg_file)
         cfg_file.close()
 
-        # Determine type of compression used
-        compress = cfg['output']['compress_pickle']
-
-        # Check for validity of compression
-        if compress not in (None, 'bz2', 'gz'):
-            raise ValueError('Invalid value for compress.')
-
-        # Prepare to open files, depending up compression requested
-        if compress is None:
-            fload = open
-        elif compress == 'bz2':
-            fload = bz2.BZ2File
-        elif compress == 'gz':
-            fload = gzip.GzipFile
-        
         # Start timing, if requested
         if timing:
             time_start = time.time()
 
         # Load combined results
         path_summaries = cfg['output']['path_summaries']
-        with fload(path_summaries, 'rb') as f:
-            summaries = cPickle.load(f)
+        summaries = h5py.File(path_summaries, 'r')
         
         # Load protein and peptide names
         names_proteins = []
@@ -159,14 +141,13 @@ def main(argv):
                                     ('mean', 'stdev', 'n_eff')]
         names_summaries_peptides.insert(0, 'protein')
         names_summaries_peptides.insert(1, 'peptide')
-        summaries_peptides = [names_proteins[summaries['mapping_peptides']],
-                              names_peptides,
-                              summaries['means']['gamma'],
-                              summaries['stderror']['gamma'],
-                              summaries['effective_sample_sizes']['gamma'],
-                              summaries['means']['n_cen_states_per_peptide'],
-                              summaries['stderror']['n_cen_states_per_peptide'],
-                              summaries['effective_sample_sizes']['n_cen_states_per_peptide'],]
+        summaries_peptides = [
+            names_proteins[summaries['mapping_peptides'][...]], names_peptides,
+            summaries['means']['gamma'], summaries['stderror']['gamma'],
+            summaries['effective_sample_sizes']['gamma'],
+            summaries['means']['n_cen_states_per_peptide'],
+            summaries['stderror']['n_cen_states_per_peptide'],
+            summaries['effective_sample_sizes']['n_cen_states_per_peptide'],]
         summaries_peptides = np.rec.fromarrays(summaries_peptides,
                                                names=names_summaries_peptides)
 
@@ -176,6 +157,9 @@ def main(argv):
                                    data=summaries_peptides,
                                    header=True, quote=False,
                                    sep=cfg['data']['sep_input'])
+        
+        # Close HDF5 input
+        summaries.close()
 
         # Wrap-up timing, if requested
         if timing:

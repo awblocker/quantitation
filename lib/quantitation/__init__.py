@@ -13,4 +13,4 @@ from lib import effective_sample_sizes
 from lib import posterior_means
 from lib import posterior_variances
 from lib import posterior_stderrors
-from lib import write_to_pickle
+from lib import write_to_hdf5

@@ -5,6 +5,7 @@ import sys
 import getopt
 import time
 
+import h5py
 import yaml
 import numpy as np
 
@@ -80,6 +81,7 @@ def main(argv):
         if timing:
             time_start = time.time()
         draws, accept_stats = quantitation.mcmc_serial(cfg=cfg, **data)
+
         if timing:
             time_done = time.time()
             print >> sys.stderr, TIMING_MSG % (cfg_path,
@@ -90,12 +92,10 @@ def main(argv):
 
         # Save output
         path_results = cfg['output']['pattern_results_distributed'] % chunk
-        compress = cfg['output']['compress_pickle']
-        quantitation.write_to_pickle(fname=path_results,
-                                     compress=compress,
-                                     draws=draws,
-                                     accept_stats=accept_stats,
-                                     mapping_peptides=data['mapping_peptides'])
+        compress = cfg['output']['compress']
+        quantitation.write_to_hdf5(
+            fname=path_results, compress=compress, draws=draws,
+            accept_stats=accept_stats, mapping_peptides=mapping_peptides)
 
 if __name__ == '__main__':
     main(sys.argv[1:])

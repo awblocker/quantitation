@@ -9,6 +9,8 @@ import bz2
 import gzip
 import contextlib
 
+import h5py
+import numpy as np
 import yaml
 
 import quantitation
@@ -79,36 +81,30 @@ def main(argv):
         cfg_file.close()
 
         # Determine type of compression used
-        compress = cfg['output']['compress_pickle']
+        compress = cfg['output']['compress']
 
         # Check for validity of compression
-        if compress not in (None, 'bz2', 'gz'):
+        if compress not in (None, 'gzip', 'lzf', 'szip'):
             raise ValueError('Invalid value for compress.')
 
-        # Prepare to open files, depending up compression requested
-        if compress is None:
-            fload = open
-        elif compress == 'bz2':
-            fload = bz2.BZ2File
-        elif compress == 'gz':
-            fload = gzip.GzipFile
-        
         # Start timing, if requested
         if timing:
             time_start = time.time()
 
         # Load combined results
         path_results = cfg['output']['path_results_combined']
-        with contextlib.closing(fload(path_results, 'rb')) as f:
-            results = cPickle.load(f)
+        results = h5py.File(path_results, 'r')
 
-        draws = results['draws']
+        draws_input = results['draws']
         
         if (cfg['settings']['burn_in'] is not None and
             cfg['settings']['burn_in']>0):
             # Eliminate burn-in, if requested
-            for k in draws.keys():
-                draws[k] = draws[k][cfg['settings']['burn_in']:]
+            draws = {}
+            for k in draws_input.keys():
+                draws[k] = draws_input[k][cfg['settings']['burn_in']:]
+        else:
+            draws = draws_input
 
         # Summarize results
         effective_sample_sizes = quantitation.effective_sample_sizes(**draws)
@@ -118,14 +114,12 @@ def main(argv):
 
         # Write combined results to file with appropriate compression
         path_summaries = cfg['output']['path_summaries']
-        quantitation.write_to_pickle(fname=path_summaries,
-                                  compress=compress,
-                                  effective_sample_sizes=effective_sample_sizes,
-                                  means=means,
-                                  variances=variances,
-                                  stderror=stderrors,
-                                  accept_stats=results['accept_stats'],
-                                  mapping_peptides=results['mapping_peptides'])
+        quantitation.write_to_hdf5(
+            fname=path_summaries, compress=compress,
+            effective_sample_sizes=effective_sample_sizes, means=means,
+            variances=variances, stderror=stderrors,
+            accept_stats=results['accept_stats'],
+            mapping_peptides=results['mapping_peptides'])
         
         # Wrap-up timing, if requested
         if timing:

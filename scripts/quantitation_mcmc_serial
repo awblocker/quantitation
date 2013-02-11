@@ -5,6 +5,7 @@ import sys
 import getopt
 import time
 
+import h5py
 import yaml
 import numpy as np
 
@@ -94,12 +95,10 @@ def main(argv):
 
         # Save output
         path_results = cfg['output']['path_results_combined']
-        compress = cfg['output']['compress_pickle']
-        quantitation.write_to_pickle(fname=path_results,
-                                     compress=compress,
-                                     draws=draws,
-                                     accept_stats=accept_stats,
-                                     mapping_peptides=mapping_peptides)
+        compress = cfg['output']['compress']
+        quantitation.write_to_hdf5(
+            fname=path_results, compress=compress, draws=draws,
+            accept_stats=accept_stats, mapping_peptides=mapping_peptides)
 
 if __name__ == '__main__':
     main(sys.argv[1:])
