@@ -1,0 +1,102 @@
+#!python
+
+# Load libraries
+import sys
+import getopt
+import time
+
+import yaml
+import numpy as np
+
+import quantitation
+from quantitation.mcmc_parallel import load_data
+
+# Define constants
+
+HELP = '''
+Usage: quantitation_mcmc_distributed [options] CHUNK NCHUNKS CONFIG [CONFIG]
+
+Runs distributed MCMC sampler for absolute quantitation from LC/MSMS data.
+
+Writes MCMC output to path specified in each CONFIG file for distributed
+results.
+
+Options:
+  -h, --help            Show this help message and exit
+  --time                Time MCMC sampler; writes timing information to stderr
+
+Details of the required format for the YAML CONFIG files can be found it further
+documentation.
+'''
+
+TIMING_MSG = '''
+%s
+--------------------------------------------------------------------------------
+MCMC sampler used %f seconds for %d iterations.
+%f seconds per iteration.
+'''
+
+def main(argv):
+    '''
+    Main function for option-parsing and startup.
+    
+    Takes sys.argv[1:] as input.
+    '''
+    # Set default values for options
+    timing = False
+    
+    # Parse arguments and options
+    opts, args = getopt.getopt(argv, "h",
+                               ["help", "time"])
+    for option, value in opts:
+        if option in ('-h', "--help"):
+            print >> sys.stderr, HELP
+            sys.exit(2)
+        elif option=='--time':
+            timing = True
+        else:
+            print >> sys.stderr, "Error -- unknown option %s" % option
+            sys.exit(1)
+
+    if len(args) > 2:
+        chunk = int(args[0])
+        n_chunks = int(args[1])
+        cfg_paths = args[2:]
+    else:
+        print >> sys.stderr, \
+                "Error -- need CHUNK, NCHUNKS, and path to YAML configuration"
+        sys.exit(1)
+    
+    # Iterate over configuration files
+    for cfg_path in cfg_paths:
+        # Parse YAML configuration
+        cfg_file = open(cfg_path, 'rb')
+        cfg = yaml.load(cfg_file)
+        cfg_file.close()
+        
+        # Load data
+        data = load_data(cfg, rank=chunk, n_workers=n_chunks)
+        # Run MCMC sampler
+        if timing:
+            time_start = time.time()
+        draws, accept_stats = quantitation.mcmc_serial(cfg=cfg, **data)
+        if timing:
+            time_done = time.time()
+            print >> sys.stderr, TIMING_MSG % (cfg_path,
+                                               time_done-time_start,
+                                               cfg['settings']['n_iterations'],
+                                               (time_done-time_start) /
+                                               cfg['settings']['n_iterations'])
+
+        # Save output
+        path_results = cfg['output']['pattern_results_distributed'] % chunk
+        compress = cfg['output']['compress_pickle']
+        quantitation.write_to_pickle(fname=path_results,
+                                     compress=compress,
+                                     draws=draws,
+                                     accept_stats=accept_stats,
+                                     mapping_peptides=data['mapping_peptides'])
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+
