@@ -16,6 +16,8 @@ output:
     path_results_combined: "test/draws_sim.pickle.bz2"
     # Path for posterior summaries and diagnostics
     path_summaries: "test/summaries_sim.pickle.bz2"
+    # Pattern (sprintf-style) for distributed
+    pattern_results_distributed: "test/draws_sim_distributed-%03d.pickle.bz2"
 
 # Section for prior parameters
 priors:
