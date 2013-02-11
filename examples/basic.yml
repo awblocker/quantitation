@@ -2,22 +2,28 @@
 data:
     path_data_state: data/data_state_sim.txt
     path_mapping_peptides: data/mapping_peptides_sim.txt
+    path_names_peptides: data/names_peptides_sim.txt
+    path_names_proteins: data/names_proteins_sim.txt
     sep_input: " "
 
 # Section for output information for MCMC
 output:
-    # Compression for pickled output
-    compress_pickle : bz2
+    # Compression for HDF5 output
+    compress: gzip
     # Path for master results
-    path_results_master: "test/draws_sim_master.pickle.bz2"
+    path_results_master: "test/draws_sim_master.hdf5"
     # Pattern (sprintf-style) for worker-specific results
-    pattern_results_worker: "test/draws_sim_worker-%03d.pickle.bz2"
+    pattern_results_worker: "test/draws_sim_worker-%03d.hdf5"
     # Path for combined and serial results
-    path_results_combined: "test/draws_sim.pickle.bz2"
+    path_results_combined: "test/draws_sim.hdf5"
     # Path for posterior summaries and diagnostics
-    path_summaries: "test/summaries_sim.pickle.bz2"
+    path_summaries: "test/summaries_sim.hdf5"
     # Pattern (sprintf-style) for distributed
-    pattern_results_distributed: "test/draws_sim_distributed-%03d.pickle.bz2"
+    pattern_results_distributed: "test/draws_sim_distributed-%03d.hdf5"
+    # Path for protein-level text results
+    path_protein_summaries_txt: test/protein_summaries_sim.txt
+    # Path for peptide-level text results
+    path_peptide_summaries_txt: test/peptide_summaries_sim.txt
 
 # Section for prior parameters
 priors:
@@ -68,6 +74,7 @@ init:
     
 # Section for algorithmic settings for MCMC
 settings:
+    burn_in: 100
     n_iterations: 1000
     propDf: 3.
     verbose: 1

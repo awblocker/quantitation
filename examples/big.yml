@@ -8,16 +8,18 @@ data:
 
 # Section for output information for MCMC
 output:
-    # Compression for pickled output
-    compress_pickle : bz2
+    # Compression for HDF5 output
+    compress: gzip
     # Path for master results
-    path_results_master: "test/draws_sim-big_master.pickle.bz2"
+    path_results_master: "test/draws_sim-big_master.hdf5"
     # Pattern (sprintf-style) for worker-specific results
-    pattern_results_worker: "test/draws_sim-big_worker-%03d.pickle.bz2"
+    pattern_results_worker: "test/draws_sim-big_worker-%03d.hdf5"
     # Path for combined and serial results
-    path_results_combined: "test/draws_sim-big.pickle.bz2"
+    path_results_combined: "test/draws_sim-big.hdf5"
     # Path for posterior summaries and diagnostics
-    path_summaries: "test/summaries_sim-big.pickle.bz2"
+    path_summaries: "test/summaries_sim-big.hdf5"
+    # Pattern (sprintf-style) for distributed
+    pattern_results_distributed: "test/draws_sim-big_distributed-%03d.hdf5"
     # Path for protein-level text results
     path_protein_summaries_txt: test/protein_summaries_sim-big.txt
     # Path for peptide-level text results
@@ -72,6 +74,7 @@ init:
     
 # Section for algorithmic settings for MCMC
 settings:
+    burn_in: 100
     n_iterations: 1000
     propDf: 3.
     verbose: 1
