@@ -1320,7 +1320,7 @@ def write_to_hdf5(fname, compress='gzip', **kwargs):
 
 def write_args_to_hdf5(hdf5, compress, **kwargs):
     for k, v in kwargs.iteritems():
-        if type(v) is dict:
+        if type(v) is dict or type(v) is h5py.Group:
             d = hdf5.create_group(k)
             write_args_to_hdf5(d, compress, **v)
         else:
