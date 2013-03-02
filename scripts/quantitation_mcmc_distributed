@@ -25,6 +25,8 @@ results.
 Options:
   -h, --help            Show this help message and exit
   --time                Time MCMC sampler; writes timing information to stderr
+  --update              Update MCMC inferences based on aggregated
+                        hyperparameter posterior
 
 Details of the required format for the YAML CONFIG files can be found it further
 documentation.
@@ -45,16 +47,19 @@ def main(argv):
     '''
     # Set default values for options
     timing = False
+    update = False
     
     # Parse arguments and options
     opts, args = getopt.getopt(argv, "h",
-                               ["help", "time"])
+                               ["help", "time", "update"])
     for option, value in opts:
         if option in ('-h', "--help"):
             print >> sys.stderr, HELP
             sys.exit(2)
         elif option=='--time':
             timing = True
+        elif option=='--update':
+            update = True
         else:
             print >> sys.stderr, "Error -- unknown option %s" % option
             sys.exit(1)
