@@ -5,7 +5,7 @@ from scipy import spatial
 # Covariance functions
 
 
-def approx_quantile(coverage_prob, d, n):
+def approx_quantile(coverage_prob, d, n, exp=1):
     '''
     Compute approximate coverage_prob quantile of maximal distance between n
     spherically-distributed points with identity covariance and the origin.
@@ -13,20 +13,29 @@ def approx_quantile(coverage_prob, d, n):
     Arguments
     ---------
     coverage_prob : number
-      Probability that maximum distance is less than returned value.
+        Probability that maximum distance is less than returned value.
     d : integer
-      Number of dimensions.
+        Number of dimensions.
     n : integer
-      Number of distances over which points are distributed.
+        Number of distances over which points are distributed.
+    exp : number
+        Tail exponent for distance distribution (upper bound)
 
     Returns
     -------
     q : float
-      Approximate coverage_prob quantile of maximum distance distribution.
+        Approximate coverage_prob quantile of maximum distance distribution.
     '''
-    return np.sqrt(np.sqrt(2. * d) * (-np.log(-np.log(coverage_prob)) /
-                                      np.sqrt(2 * np.log(n)) + 2 * np.log(n) -
-                                      0.5 * np.log(np.log(n))))
+    if 1 <= exp and exp < 2:
+        return np.sqrt(
+            d * (-np.log(-np.log(coverage_prob)) + np.log(n)))
+    elif exp >= 2:
+        return np.sqrt(
+            np.sqrt(2. * d) * (
+                -np.log(-np.log(coverage_prob)) / np.sqrt(2 * np.log(n)) +
+                np.sqrt(2 * np.log(n)) -
+                0.5 * np.log(np.log(n) * 4 * np.pi) / np.sqrt(2 * np.log(n)) +
+                d)
 
 
 def cov_sqexp(r, scale=1.):
@@ -438,3 +447,5 @@ def aggregate_emulators_mpi(comm, emulator=None, MPIROOT=0, **kwargs):
         # Worker node process
         # Send emulator to aggregator
         comm.gather(emulator, root=MPIROOT)
+
+
