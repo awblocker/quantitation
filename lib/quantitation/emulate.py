@@ -26,7 +26,9 @@ def approx_quantile(coverage_prob, d, n, exp=1):
     q : float
         Approximate coverage_prob quantile of maximum distance distribution.
     '''
-    if 1 <= exp and exp < 2:
+    if exp < 1:
+        raise ValueError('Tail exponent too small.')
+    elif 1 <= exp and exp < 2:
         return np.sqrt(
             d * (-np.log(-np.log(coverage_prob)) + np.log(n)))
     elif exp >= 2:
