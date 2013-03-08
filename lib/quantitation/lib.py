@@ -1412,6 +1412,7 @@ def write_to_hdf5(fname, compress='gzip', **kwargs):
     # Close file used for output
     out_file.close()
 
+
 def write_args_to_hdf5(hdf5, compress, **kwargs):
     for k, v in kwargs.iteritems():
         if type(v) is dict or type(v) is h5py.Group:
@@ -1516,3 +1517,4 @@ def write_recarray_to_file(fname, data, header=True, quote=True, sep=' '):
 
     # Close output file
     out_file.close()
+
