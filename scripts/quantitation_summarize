@@ -14,6 +14,7 @@ import numpy as np
 import yaml
 
 import quantitation
+from quantitation import estimands
 
 # Define constants
 
@@ -106,11 +107,22 @@ def main(argv):
         else:
             draws = draws_input
 
+        n_draws = cfg['settings']['n_iterations'] - cfg['settings']['burn_in']
+
+        # Compute proportion of concentration estimand
+        draws['concentration_estimand'] = estimands.proportion_of_concentration(
+            draws['mu'])
+
         # Summarize results
         effective_sample_sizes = quantitation.effective_sample_sizes(**draws)
         means = quantitation.posterior_means(**draws)
         variances = quantitation.posterior_variances(**draws)
         stderrors = quantitation.posterior_stderrors(**draws)
+        medians = quantitation.posterior_medians(**draws)
+        hpd_intervals = quantitation.hpd_intervals(prob=0.95, **draws)
+        modes = quantitation.hpd_intervals(prob=n_draws**(-0.25))
+        for k, v in modes.iteritems():
+            modes[k] = np.mean(v, 1)
 
         # Write combined results to file with appropriate compression
         path_summaries = cfg['output']['path_summaries']
@@ -118,6 +130,7 @@ def main(argv):
             fname=path_summaries, compress=compress,
             effective_sample_sizes=effective_sample_sizes, means=means,
             variances=variances, stderror=stderrors,
+            medians=medians, hpd_intervals=hpd_intervals, modes=modes,
             accept_stats=results['accept_stats'],
             mapping_peptides=results['mapping_peptides'])
         
