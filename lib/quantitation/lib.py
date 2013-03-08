@@ -5,6 +5,7 @@ import bz2
 import copy
 import cPickle
 import gzip
+import itertools
 
 import h5py
 
@@ -1162,6 +1163,48 @@ def effective_sample_sizes(**kwargs):
         return ess[kwargs.keys()[0]]
 
 
+def posterior_medians(**kwargs):
+    '''
+    Estimate posterior medians from inputs.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+
+    Parameters
+    ----------
+    - **kwargs
+        Names and arrays of MCMC draws.
+
+    Returns
+    -------
+    - If only one array of draws is provided, a single array containing the
+      posterior median estimate(s) for those variables.
+    - If multiple arrays are provided, a dictionary with keys identical to
+      those provided as parameters and one array per input containing
+      posterior median estimate(s).
+
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+
+    # Allocate empty dictionary for results
+    medians = {}
+
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:, np.newaxis]
+
+        # Estimate posterior means
+        medians[var] = np.median(draws, 0)
+
+    if len(kwargs) > 1:
+        return medians
+    else:
+        return medians[kwargs.keys()[0]]
+
+
 def posterior_means(**kwargs):
     '''
     Estimate posterior means from inputs.
@@ -1286,6 +1329,57 @@ def posterior_stderrors(**kwargs):
         return stderrors
     else:
         return stderrors[kwargs.keys()[0]]
+
+
+def hpd_intervals(prob=0.95, **kwargs):
+    '''
+    Estimate HPD intervals from inputs.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+
+    Parameters
+    ----------
+    **kwargs
+        Names and arrays of MCMC draws.
+
+    Returns
+    -------
+    - If only one array of draws is provided, a single array containing the
+      HPD interval estimate(s) for those variables.
+    - If multiple arrays are provided, a dictionary with keys identical to
+      those provided as parameters and one array per input containing
+      HPD interval estimate(s).
+
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+
+    # Allocate empty dictionary for results
+    intervals = {}
+
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:, np.newaxis]
+
+        # Estimate HPD intervals, based on HPDinterval function in coda R
+        # package
+        sorted_draws = np.sort(draws, 0)
+        n_draws = draws.shape[0]
+        gap = max(1, min(n_draws - 1, int(round(n_draws * prob))))
+        inds = [np.argmin(v[gap:] - v[:-gap]) for v in sorted_draws.T]
+        hpd = np.empty((draws.shape[1], 2), draws.dtype)
+        hpd[:, 0] = [v[i] for v, i in itertools.izip(sorted_draws.T, inds)]
+        hpd[:, 1] = [v[i + gap] for v, i in itertools.izip(sorted_draws.T,
+                                                           inds)]
+        intervals[var] = hpd
+
+    if len(kwargs) > 1:
+        return intervals
+    else:
+        return intervals[kwargs.keys()[0]]
 
 #==============================================================================
 # General-purpose IO functions
