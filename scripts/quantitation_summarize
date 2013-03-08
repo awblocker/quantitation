@@ -120,7 +120,7 @@ def main(argv):
         stderrors = quantitation.posterior_stderrors(**draws)
         medians = quantitation.posterior_medians(**draws)
         hpd_intervals = quantitation.hpd_intervals(prob=0.95, **draws)
-        modes = quantitation.hpd_intervals(prob=n_draws**(-0.25))
+        modes = quantitation.hpd_intervals(prob=n_draws**(-0.25), **draws)
         for k, v in modes.iteritems():
             modes[k] = np.mean(v, 1)
 
