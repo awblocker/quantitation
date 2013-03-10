@@ -106,20 +106,19 @@ def main(argv):
         # Sequence is (mu, sigmasq, tausq) x (means, stderrors,
         # effective_sample_sizes)
         names_summaries_proteins = [var + '_' + summary for var in
-                                    ('mu', 'sigmasq', 'tausq')
+                                    ('mu', 'sigmasq', 'tausq',
+                                     'concentration_estimand')
                                     for summary in
-                                    ('mean', 'stdev', 'n_eff')]
+                                    ('mean', 'median', 'mode', 'stdev',
+                                     'n_eff')]
         names_summaries_proteins.insert(0, 'protein')
-        summaries_proteins = [names_proteins,
-                              summaries['means']['mu'],
-                              summaries['stderror']['mu'],
-                              summaries['effective_sample_sizes']['mu'],
-                              summaries['means']['sigmasq'],
-                              summaries['stderror']['sigmasq'],
-                              summaries['effective_sample_sizes']['sigmasq'],
-                              summaries['means']['tausq'],
-                              summaries['stderror']['tausq'],
-                              summaries['effective_sample_sizes']['tausq'],]
+        summaries_proteins = [names_proteins]
+        summaries_proteins.extend([summaries[summary][var]  for var in
+                                    ('mu', 'sigmasq', 'tausq',
+                                     'concentration_estimand')
+                                    for summary in
+                                    ('means', 'medians', 'modes', 'stderror',
+                                     'effective_sample_sizes')])
         summaries_proteins = np.rec.fromarrays(summaries_proteins,
                                                names=names_summaries_proteins)
 
@@ -137,17 +136,17 @@ def main(argv):
         # effective_sample_sizes)
         names_summaries_peptides = [var + '_' + summary for var in
                                     ('gamma', 'n_cen_states_per_peptide')
-                                    for summary in
-                                    ('mean', 'stdev', 'n_eff')]
+                                    for summary in ('mean', 'median', 'mode',
+                                                    'stdev', 'n_eff')]
         names_summaries_peptides.insert(0, 'protein')
         names_summaries_peptides.insert(1, 'peptide')
         summaries_peptides = [
-            names_proteins[summaries['mapping_peptides'][...]], names_peptides,
-            summaries['means']['gamma'], summaries['stderror']['gamma'],
-            summaries['effective_sample_sizes']['gamma'],
-            summaries['means']['n_cen_states_per_peptide'],
-            summaries['stderror']['n_cen_states_per_peptide'],
-            summaries['effective_sample_sizes']['n_cen_states_per_peptide'],]
+            names_proteins[summaries['mapping_peptides'][...]], names_peptides]
+        summaries_peptides.extend([
+            summaries[summary][var]
+            for var in ('gamma', 'n_cen_states_per_peptide')
+            for summary in ('means', 'medians', 'modes', 'stderror',
+                            'effective_sample_sizes')])
         summaries_peptides = np.rec.fromarrays(summaries_peptides,
                                                names=names_summaries_peptides)
 
