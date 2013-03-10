@@ -22,6 +22,6 @@ def proportion_of_concentration(mu_draws, base=10):
         Array of same size as mu containing the estimand.
     '''
     prop = base**mu_draws
-    prop = (prop.T / prop.mean(1)).T
+    prop = (prop.T / prop.sum(1)).T
     return prop
 
