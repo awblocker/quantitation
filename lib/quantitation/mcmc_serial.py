@@ -187,7 +187,12 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         n_obs_states_per_peptide[peptides_obs])
 
     # Instantiate GLM family for eta step
-    logit_family = glm.families.Binomial(link=glm.links.Logit)
+    try:
+        glm_link_name = cfg["prior"]["glm_link"]
+    except:
+        glm_link_name = "Logit"
+    glm_link = getattr(glm.links, glm_link_name)
+    glm_family = glm.families.Binomial(link=glm_link)
 
     # Initialize dictionary for acceptance statistics
     accept_stats = {'sigmasq_dist': 0,
@@ -323,12 +328,12 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         y[:n_obs_states] = 1.
 
         # (10b) Estimate GLM parameters.
-        fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True)
+        fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True)
 
         # (10c) Execute MH step.
         eta_draws[t], accept = glm.mh_update_glm_coef(b_prev=eta_draws[t - 1],
                                                       y=y, X=X,
-                                                      family=logit_family,
+                                                      family=glm_family,
                                                       **fit_eta)
         accept_stats['eta'] += accept
 

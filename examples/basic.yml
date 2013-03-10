@@ -27,6 +27,7 @@ output:
 
 # Section for prior parameters
 priors:
+    glm_link : "Logit"
     # Random censoring probability
     p_rnd_cen:
         prior_a: 1.

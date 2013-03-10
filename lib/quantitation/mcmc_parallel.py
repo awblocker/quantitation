@@ -473,7 +473,12 @@ def worker(comm, rank, data, cfg):
     tausq_draws = np.empty((n_iterations, n_proteins))
 
     # Instantiate GLM family for eta step
-    logit_family = glm.families.Binomial(link=glm.links.Logit)
+    try:
+        glm_link_name = cfg["prior"]["glm_link"]
+    except:
+        glm_link_name = "Logit"
+    glm_link = getattr(glm.links, glm_link_name)
+    glm_family = glm.families.Binomial(link=glm_link)
 
     # Setup data structure for shared parameters/hyperparameters sync
     # Layout:
@@ -511,10 +516,10 @@ def worker(comm, rank, data, cfg):
 
             # Protein-level means using mean observed intensity; excluding
             # missing peptides
-            mu_draws[0] = (np.bincount(mapping_peptides,
-                                       total_intensity_obs_per_peptide /
-                                       np.maximum(1, n_obs_states_per_peptide)) /
-                           n_obs_peptides_per_protein)
+            mu_draws[0] = (
+                np.bincount(mapping_peptides, total_intensity_obs_per_peptide /
+                            np.maximum(1, n_obs_states_per_peptide)) /
+                n_obs_peptides_per_protein)
 
             # Peptide-level means using mean observed intensity; imputing
             # missing peptides as protein observed means
@@ -666,12 +671,12 @@ def worker(comm, rank, data, cfg):
             y[:n_obs_states] = 1.
 
             # Estimate GLM parameters.
-            fit_eta = glm.glm(y=y, X=X, family=logit_family, info=True,
+            fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True,
                               cov=True)
 
             # Handle distributed computation draw
             updates_parallel.rmh_worker_glm_coef(
-              comm=comm, b_prev=eta, family=logit_family, y=y, X=X,
+              comm=comm, b_prev=eta, family=glm_family, y=y, X=X,
               MPIROOT=MPIROOT, **fit_eta)
         elif task == TAGS['PRNDCEN']:
             # Run distributed Gibbs step for p_rnd_cen
