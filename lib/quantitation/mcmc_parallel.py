@@ -474,8 +474,9 @@ def worker(comm, rank, data, cfg):
 
     # Instantiate GLM family for eta step
     try:
-        glm_link_name = cfg["prior"]["glm_link"]
+        glm_link_name = cfg["priors"]["glm_link"]
     except:
+        print >> sys.stderr, "GLM link not specified; defaulting to logit"
         glm_link_name = "Logit"
     glm_link = getattr(glm.links, glm_link_name)
     glm_family = glm.families.Binomial(link=glm_link)
