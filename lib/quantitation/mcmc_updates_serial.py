@@ -397,3 +397,61 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
     return mh_update(prop=(r_prop, p_prop), prev=(r_prev, p_prev),
                      log_target_ratio=log_target_ratio,
                      log_prop_ratio=log_prop_ratio)
+
+
+def rgibbs_beta(log_concentration, gamma_bar, tausq, concentrations, n_peptides,
+                prior_mean=np.array([0., 1.]), prior_prec=np.array([0., 0.]),
+                prior_trunc_b1=(-np.Inf, np.Inf)):
+    '''
+    Gibbs update for slope and intercept of concentration/intensity model.
+
+    Relatively standard conjugate Normal regression update, univariate case.
+    Slight subtlety with the prior on beta_1; having support near 0 is
+    problematic for the measurement error draw.
+    '''
+    # Setup quantities for WLS estimation. Using pseudoobservations for prior.
+    w = np.r_[n_peptides / tausq, prior_prec]
+    X = np.ones((np.size(log_concentration) + 2, 2))
+    X[:-2, 1] = log_concentration
+    X[-2, 1] = 0
+    X[-1, 0] = 0
+    y = np.r_[gamma_bar, prior_mean]
+    
+    # Run WLS
+    estimate = glm.wls(X=X, y=y, w=w)
+
+    # Get posterior covariance
+    Sigma = linalg.cho_solve((estimate['L'], True), np.eye(2))
+
+    # Draw beta_1 from truncated distribution
+    beta = np.empty(2)
+    beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + estimate['b'][1]
+    while beta[1] < prior_trunc_b1[0] or beta[1] > prior_trunc_b1[1]:
+        beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + estimate['b'][1]
+
+    # Draw beta_0 from conditional posterior given beta_1
+    beta[0] = np.random.randn(1) * \
+            np.sqrt(Sigma[0,0] - Sigma[0,1]**2 / Sigma[1,1]) + \
+            estimate['b'][0] + Sigma[0,1] / Sigma[1,1] * \
+            (beta[1] - estimate['b'][1])
+    
+    return beta
+
+
+def rgibbs_concentration(gamma_bar, tausq, n_peptides, beta):
+    '''
+    Gibbs update for (log) concentrations given all other parameters.
+
+    This is a standard conjugate normal draw for a hierarchical model.
+    The dimensionality of the draw is determined by the size of gamma_bar.
+    All other inputs must be compatible in size.
+    '''
+    # Compute conditional posterior mean and variance
+    post_var = tausq / n_peptides / beta[1]**2
+    post_mean = (gamma_bar - beta[0]) / beta[1]
+
+    # Draw concentrations
+    concentrations = np.random.normal(loc=post_mean, scale=np.sqrt(post_var),
+                                      size=gamma_bar.size)
+    return concentrations
+
