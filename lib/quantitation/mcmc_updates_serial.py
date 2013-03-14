@@ -399,7 +399,7 @@ def rmh_nbinom_hyperparams(x, r_prev, p_prev,
                      log_prop_ratio=log_prop_ratio)
 
 
-def rgibbs_beta(log_concentration, gamma_bar, tausq, concentrations, n_peptides,
+def rgibbs_beta(concentrations, gamma_bar, tausq, n_peptides,
                 prior_mean=np.array([0., 1.]), prior_prec=np.array([0., 0.]),
                 prior_trunc_b1=(-np.Inf, np.Inf)):
     '''
@@ -409,10 +409,10 @@ def rgibbs_beta(log_concentration, gamma_bar, tausq, concentrations, n_peptides,
     Slight subtlety with the prior on beta_1; having support near 0 is
     problematic for the measurement error draw.
     '''
-    # Setup quantities for WLS estimation. Using pseudoobservations for prior.
+    # Setup quantities for WLS estimation. Using pseudo-observations for prior.
     w = np.r_[n_peptides / tausq, prior_prec]
-    X = np.ones((np.size(log_concentration) + 2, 2))
-    X[:-2, 1] = log_concentration
+    X = np.ones((np.size(concentrations) + 2, 2))
+    X[:-2, 1] = concentrations
     X[-2, 1] = 0
     X[-1, 0] = 0
     y = np.r_[gamma_bar, prior_mean]
@@ -454,4 +454,5 @@ def rgibbs_concentration(gamma_bar, tausq, n_peptides, beta):
     concentrations = np.random.normal(loc=post_mean, scale=np.sqrt(post_var),
                                       size=gamma_bar.size)
     return concentrations
+
 

@@ -8,6 +8,7 @@ import mcmc_updates_serial as updates
 
 
 def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
+                known_concentrations=None, mapping_known_concentrations=None,
                 **kwargs):
     '''
     Serial MCMC sampler for posterior of state-level censoring model.
@@ -50,6 +51,13 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
             Dictionary containing number of acceptances for each MH step.
 
     '''
+    # Determine whether algorithm is running with supervision
+    try:
+        supervised = cfg['prior']['supervised']
+    except:
+        print >> sys.stderr, 'Defaulting to unsupervised algorithm'
+        supervised = False
+
     # Convert inputs to np.ndarrays as needed
     if type(intensities_obs) is not np.ndarray:
         intensities_obs = np.asanyarray(intensities_obs)
@@ -101,6 +109,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                                   minlength=n_peptides)
 
     # Allocate data structures for draws
+
+    # Data structures for supervised algorithm
+    if supervised:
+        beta_draws = np.empty((n_iterations, 2))
+        concentration_draws = np.empty((n_iterations, n_proteins))
 
     # Peptide- and protein-level means
     gamma_draws = np.empty((n_iterations, n_peptides))
@@ -178,6 +191,24 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                total_intensity_obs_per_peptide /
                                np.maximum(1, n_obs_states_per_peptide)) /
                    n_obs_peptides_per_protein)
+
+    if supervised:
+        # Simple initialization for supervised algorithm
+        # Initialize beta from regression of mu against known concentrations
+        X = np.ones((known_concentrations.size, 2))
+        X[:,1] = known_concentrations
+        beta_draws[0] = glm.wls(X=X,
+                                y=mu_draws[0][mapping_known_concentrations],
+                                w=1.)['b']
+
+        # Adjust known concentrations in mu accordingly
+        mus_draw[0][mapping_known_concentrations] = beta_draws[0,0] + \
+                beta_draws[0,1] * known_concentrations
+
+        # And, initialize the concentration draws using the updates mu's
+        concentration_draws[0] = (mu_draws[0] - beta_draws[0,0]) / \
+                beta_draws[0,1]
+        
 
     # Peptide-level means using mean observed intensity; imputing missing
     # peptides as protein observed means
@@ -261,11 +292,29 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                             weights=gamma_draws[t])
         mean_gamma_by_protein /= n_peptides_per_protein
 
-        # (4) Update protein-level mean parameters (mu). Gibbs step.
-        mu_draws[t] = updates.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
-                                        tausq=tausq_draws[t - 1],
-                                        n_peptides=n_peptides_per_protein,
-                                        **cfg['priors']['mu'])
+        if supervised:
+            # (4) Update protein-level concentrations
+            # (4a) Update concentrations given coefficients. Gibbs step.
+            concentration_draws[t] = updates.rgibbs_concentration(
+                gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
+                n_peptides=n_peptides_per_protein, beta=beta_draws[t - 1])
+
+            # (4b) Update coefficients given concentrations. Gibbs step.
+            beta_draws[t] = updates.rgibbs_beta(
+                concentrations=concentration_draws[t],
+                gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
+                n_peptides=n_peptides_per_protein,
+                **cfg['priors']['beta_concentration'])
+
+            # Set mu based on concentrations and betas
+            mu_draws[t] = \
+                    beta_draws[t,0] + beta_draws[t,1] * concentration_draws[t]
+        else:
+            # (4) Update protein-level mean parameters (mu). Gibbs step.
+            mu_draws[t] = updates.rgibbs_mu(gamma_bar=mean_gamma_by_protein,
+                                            tausq=tausq_draws[t - 1],
+                                            n_peptides=n_peptides_per_protein,
+                                            **cfg['priors']['mu'])
 
         # (5) Update state-level variance parameters (sigmasq). Gibbs step.
         rss_by_state = (
@@ -356,6 +405,13 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
              'rate_tausq': rate_tausq,
              'shape_sigmasq': shape_sigmasq,
              'rate_sigmasq': rate_sigmasq}
+    
+    # Add additional information for supervised algorithm
+    if supervised:
+        draws.update({
+            'beta': beta_draws,
+            'concentration': concentration_draws})
+
     return (draws, accept_stats)
 
 
