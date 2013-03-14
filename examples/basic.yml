@@ -4,6 +4,7 @@ data:
     path_mapping_peptides: data/mapping_peptides_sim.txt
     path_names_peptides: data/names_peptides_sim.txt
     path_names_proteins: data/names_proteins_sim.txt
+    path_known_concentrations: data/concentrations_sim.txt
     sep_input: " "
 
 # Section for output information for MCMC
@@ -54,6 +55,13 @@ priors:
     mu:
         prior_mean: 0.
         prior_prec: 0.
+    # Use semi-supervised algorithm?
+    supervised: False
+    # Prior for coefficients of concentration/intensity relationships
+    beta_concentration:
+        prior_mean: [0., 1.]
+        prior_prec: [0., 0.]
+        prior_trunc_b1: [0.1, 10.]
 
 # Section for initializations
 init:
@@ -79,7 +87,7 @@ settings:
     n_iterations: 1000
     propDf: 3.
     verbose: 1
-    verbose_interval: 10
+    verbose_interval: 50
     n_strata: 10
     seed_load_data: 0
 
