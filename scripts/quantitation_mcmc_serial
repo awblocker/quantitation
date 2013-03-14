@@ -69,6 +69,13 @@ def main(argv):
         cfg_file = open(cfg_path, 'rb')
         cfg = yaml.load(cfg_file)
         cfg_file.close()
+
+        # Use supervised algorithm?
+        try:
+            supervised = cfg['prior']['supervised']
+        except:
+            print >> sys.stderr, 'Defaulting to unsupervised algorithm'
+            supervised = False
         
         # Load data
         mapping_peptides = np.loadtxt(cfg['data']['path_mapping_peptides'],
@@ -78,13 +85,24 @@ def main(argv):
                                         ('intensity', np.float)],
                                  unpack=True)
         mapping_states_obs, intensities_obs = data_states
+        if supervised:
+            data_concentrations = np.loadtxt(
+                cfg['data']['path_concentrations'],
+                dtype=[('protein', np.int),
+                       ('concentration', np.float)],
+                unpack=True)
+        else:
+            data_concentrations = (None, None)
+        
+        mapping_known_concentrations, known_concentrations = data_concentrations
+
 
         # Run MCMC sampler
         if timing:
             time_start = time.time()
-        draws, accept_stats = quantitation.mcmc_serial(intensities_obs,
-                                                       mapping_states_obs,
-                                                       mapping_peptides, cfg)
+        draws, accept_stats = quantitation.mcmc_serial(
+            intensities_obs, mapping_states_obs, mapping_peptides,
+            known_concentrations, mapping_known_concentrations, cfg)
         if timing:
             time_done = time.time()
             print >> sys.stderr, TIMING_MSG % (cfg_path,
