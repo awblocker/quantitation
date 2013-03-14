@@ -72,7 +72,7 @@ def main(argv):
 
         # Use supervised algorithm?
         try:
-            supervised = cfg['prior']['supervised']
+            supervised = cfg['priors']['supervised']
         except:
             print >> sys.stderr, 'Defaulting to unsupervised algorithm'
             supervised = False
@@ -102,7 +102,7 @@ def main(argv):
             time_start = time.time()
         draws, accept_stats = quantitation.mcmc_serial(
             intensities_obs, mapping_states_obs, mapping_peptides,
-            known_concentrations, mapping_known_concentrations, cfg)
+            cfg, known_concentrations, mapping_known_concentrations)
         if timing:
             time_done = time.time()
             print >> sys.stderr, TIMING_MSG % (cfg_path,

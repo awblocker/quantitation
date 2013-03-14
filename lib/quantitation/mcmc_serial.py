@@ -53,7 +53,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
     '''
     # Determine whether algorithm is running with supervision
     try:
-        supervised = cfg['prior']['supervised']
+        supervised = cfg['priors']['supervised']
     except:
         print >> sys.stderr, 'Defaulting to unsupervised algorithm'
         supervised = False
@@ -202,7 +202,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                 w=1.)['b']
 
         # Adjust known concentrations in mu accordingly
-        mus_draw[0][mapping_known_concentrations] = beta_draws[0,0] + \
+        mu_draws[0][mapping_known_concentrations] = beta_draws[0,0] + \
                 beta_draws[0,1] * known_concentrations
 
         # And, initialize the concentration draws using the updates mu's
@@ -294,17 +294,19 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
 
         if supervised:
             # (4) Update protein-level concentrations
-            # (4a) Update concentrations given coefficients. Gibbs step.
-            concentration_draws[t] = updates.rgibbs_concentration(
-                gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
-                n_peptides=n_peptides_per_protein, beta=beta_draws[t - 1])
-
-            # (4b) Update coefficients given concentrations. Gibbs step.
+            # (4a) Update coefficients given concentrations. Gibbs step.
             beta_draws[t] = updates.rgibbs_beta(
-                concentrations=concentration_draws[t],
+                concentrations=concentration_draws[t-1],
                 gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
                 n_peptides=n_peptides_per_protein,
                 **cfg['priors']['beta_concentration'])
+
+            # (4b) Update concentrations given coefficients. Gibbs step.
+            concentration_draws[t] = updates.rgibbs_concentration(
+                gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
+                n_peptides=n_peptides_per_protein, beta=beta_draws[t])
+            concentration_draws[t][mapping_known_concentrations] = \
+                    known_concentrations
 
             # Set mu based on concentrations and betas
             mu_draws[t] = \
