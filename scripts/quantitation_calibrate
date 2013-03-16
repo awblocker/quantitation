@@ -1,0 +1,145 @@
+#!python
+
+# Load libraries
+import sys
+import getopt
+import time
+import cPickle
+import bz2
+import gzip
+import contextlib
+
+import h5py
+import numpy as np
+import yaml
+
+import quantitation
+from quantitation import estimands
+
+# Define constants
+
+HELP = '''
+Usage: quantitation_calibrate [options] CONFIG [CONFIG]
+
+Calibrate MCMC results to concentration scale using known standard. This
+operates as a regression-based estimand. This should be run only after obtaining
+combined MCMC output. This requires running quantitation_combine_results if
+quantitation_mcmc_parallel was used to perform sampling.
+
+Reads MCMC output from the path specified in each CONFIG for combined output.
+
+Updates combined MCMC output with concentration draws based on calibration.
+
+Options:
+  -h, --help            Show this help message and exit
+  --time                Time summarization process; writes timing information to
+                        stderr
+
+Details of the required format for the YAML CONFIG files can be found it further
+documentation.
+'''
+
+TIMING_MSG = '''
+%s
+--------------------------------------------------------------------------------
+Calibration process used %f seconds.
+'''
+
+def main(argv):
+    '''
+    Main function for option-parsing and startup.
+    
+    Takes sys.argv[1:] as input.
+    '''
+    # Set default values for options
+    timing = False
+    
+    # Parse arguments and options
+    opts, args = getopt.getopt(argv, "h",
+                               ["help", "time"])
+    for option, value in opts:
+        if option in ('-h', "--help"):
+            print >> sys.stderr, HELP
+            sys.exit(2)
+        elif option=='--time':
+            timing = True
+        else:
+            print >> sys.stderr, "Error -- unknown option %s" % option
+            sys.exit(1)
+
+    if len(args) > 0:
+        cfg_paths = args
+    else:
+        print >> sys.stderr, "Error -- need path to YAML configuration"
+        sys.exit(1)
+
+    # Iterate over configuration files
+    for cfg_path in cfg_paths:
+        # Parse YAML configuration
+        cfg_file = open(cfg_path, 'rb')
+        cfg = yaml.load(cfg_file)
+        cfg_file.close()
+
+        # Determine type of compression used
+        compress = cfg['output']['compress']
+
+        # Check for validity of compression
+        if compress not in (None, 'gzip', 'lzf', 'szip'):
+            raise ValueError('Invalid value for compress.')
+
+        # Start timing, if requested
+        if timing:
+            time_start = time.time()
+
+        # Load combined results
+        path_results = cfg['output']['path_results_combined']
+        results = h5py.File(path_results, 'r+')
+        draws = results['draws']
+        mu = draws['mu'][...]
+
+        # Load known concentration information
+        data_concentrations = np.loadtxt(cfg['data']['path_concentrations'],
+                                         dtype=[('protein', np.int),
+                                                ('concentration', np.float)],
+                                         unpack=True)
+        mapping_known_concentrations, known_concentrations = data_concentrations
+
+        # Run a calibration regression for each draw of mu
+        mu_mean = np.mean(mu[:, mapping_known_concentrations], 1)
+        cov = np.array(
+            [np.cov(mu[i, mapping_known_concentrations],
+                    known_concentrations)[0,1] for i in xrange(mu.shape[0])])
+        concentration_mean = np.mean(known_concentrations)
+        concentration_var = np.var(known_concentrations)
+        beta1 = cov / concentration_var
+        beta0 = mu_mean - concentration_mean * beta1
+        
+        # Apply results of calibration regressions to estimate concentrations
+        concentrations = ((mu.T - beta0) / beta1).T
+        # for i, j in enumerate(mapping_known_concentrations):
+        #     concentrations[:,j] = known_concentrations[i]
+        
+        # Add concentrations to results
+        if u'concentration' in draws.keys():
+            del draws['concentration']
+        
+        draws.create_dataset('concentration', data=concentrations,
+                             compression=compress)
+
+        # Add betas to results
+        if u'beta' in draws.keys():
+            del draws['beta']
+
+        draws.create_dataset('beta', data=np.c_[beta0, beta1],
+                             compression=compress)
+
+        results.close()
+        
+        # Wrap-up timing, if requested
+        if timing:
+            time_done = time.time()
+            print >> sys.stderr, TIMING_MSG % (cfg_path, time_done-time_start)
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
+
