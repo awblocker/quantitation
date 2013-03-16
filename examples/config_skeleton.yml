@@ -1,0 +1,84 @@
+# Section for paths to data
+data:
+    path_data_state: {datadir}/data_state_{id}.txt
+    path_mapping_peptides: {datadir}/mapping_peptides_{id}.txt
+    path_names_proteins: {datadir}/names_proteins_{id}.txt
+    path_names_peptides: {datadir}/names_peptides_{id}.txt
+    sep_input: " "
+
+# Section for output information for MCMC
+output:
+    # Compression for HDF5 output
+    compress: gzip
+    # Path for master results
+    path_results_master: "{mcmcdir}/draws_master_{id}.hdf5"
+    # Pattern (sprintf-style) for worker-specific results
+    pattern_results_worker: "{mcmcdir}/draws_worker-%03d_{id}.hdf5"
+    # Path for combined and serial results
+    path_results_combined: "{mcmcdir}/draws_{id}.hdf5"
+    # Path for posterior summaries and diagnostics
+    path_summaries: "{mcmcdir}/summaries_{id}.hdf5"
+    # Pattern (sprintf-style) for distributed
+    pattern_results_distributed: "{mcmcdir}/draws_distributed-%03d_{id}.hdf5"
+    # Path for protein-level text results
+    path_protein_summaries_txt: {mcmcdir}/protein_summaries_{id}.txt
+    # Path for peptide-level text results
+    path_peptide_summaries_txt: {mcmcdir}/peptide_summaries_{id}.txt
+
+# Section for prior parameters
+priors:
+    # Random censoring probability
+    p_rnd_cen:
+        prior_a: 1.
+        prior_b: 1.
+    # Hyperparameters for n_states model
+    n_states_dist:
+        prior_a: 1.
+        prior_b: 1.
+        prior_mean_log: 2.65
+        prior_prec_log: 1.
+    # Hyperparameters for state-level variance distribution:
+    sigmasq_dist:
+        prior_shape: 1.
+        prior_rate: 1.
+        prior_mean_log: 2.65
+        prior_prec_log: 2.35
+    # Hyperparameters for peptide-level variance distribution
+    tausq_dist:
+        prior_shape: 1.
+        prior_rate: 1.
+        prior_mean_log: 2.65
+        prior_prec_log: 2.35
+    # Protein-level means
+    mu:
+        prior_mean: 0.
+        prior_prec: 0.
+
+# Section for initializations
+init:
+    # Probability of random censoring
+    p_rnd_cen: 0.1
+    # Coefficients for intensity-based censoring model
+    eta:
+        mean: [-2.5, 0.5]
+        sd: [0., 0.]
+        cor: 0.
+    # Hyperparameters for state-level variance distribution:
+    sigmasq_dist:
+        shape: 4.
+        rate: 2.
+    # Hyperparameters for peptide-level variance distribution
+    tausq_dist:
+        shape: 4.
+        rate: 2.
+    
+# Section for algorithmic settings for MCMC
+settings:
+    burn_in: 100
+    n_iterations: 1000
+    propDf: 3.
+    verbose: 1
+    verbose_interval: 50
+    n_strata: 10
+    seed_load_data: 0
+
