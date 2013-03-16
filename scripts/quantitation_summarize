@@ -110,8 +110,12 @@ def main(argv):
         n_draws = cfg['settings']['n_iterations'] - cfg['settings']['burn_in']
 
         # Compute proportion of concentration estimand
-        draws['concentration_estimand'] = estimands.proportion_of_concentration(
-            draws['mu'])
+        if u'concentration' in draws:
+            draws['concentration_estimand'] = \
+                estimands.proportion_of_concentration(draws['concentration'])
+        else:
+            draws['concentration_estimand'] = \
+                estimands.proportion_of_concentration(draws['mu'])
 
         # Summarize results
         effective_sample_sizes = quantitation.effective_sample_sizes(**draws)
