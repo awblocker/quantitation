@@ -439,7 +439,8 @@ def rgibbs_beta(concentrations, gamma_bar, tausq, n_peptides,
     return beta
 
 
-def rgibbs_concentration(gamma_bar, tausq, n_peptides, beta):
+def rgibbs_concentration(gamma_bar, tausq, n_peptides, beta,
+                         mean_concentration=0., prec_concentration=0.):
     '''
     Gibbs update for (log) concentrations given all other parameters.
 
@@ -448,8 +449,10 @@ def rgibbs_concentration(gamma_bar, tausq, n_peptides, beta):
     All other inputs must be compatible in size.
     '''
     # Compute conditional posterior mean and variance
-    post_var = tausq / n_peptides / beta[1]**2
-    post_mean = (gamma_bar - beta[0]) / beta[1]
+    post_var = 1. / (n_peptides * beta[1]**2 / tausq + prec_concentration)
+    prior_weight = prec_concentration * post_var
+    post_mean = (1. - prior_weight) * (gamma_bar - beta[0]) / beta[1] + \
+            prior_weight * mean_concentration
 
     # Draw concentrations
     concentrations = np.random.normal(loc=post_mean, scale=np.sqrt(post_var),
