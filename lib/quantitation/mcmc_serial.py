@@ -58,6 +58,15 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         print >> sys.stderr, 'Defaulting to unsupervised algorithm'
         supervised = False
 
+    # If supervised, determine whether to model distribution of concentrations
+    # If this is False, prior on $\beta_1$ is scaled by $|\beta_1|^{n_{mis}}$.
+    if supervised:
+        try:
+            concentration_dist = cfg['priors']['concentration_dist']
+        except:
+            print >> sys.stderr, 'Defaulting to flat prior on concentrations'
+            concentration_dist = False
+
     # Convert inputs to np.ndarrays as needed
     if type(intensities_obs) is not np.ndarray:
         intensities_obs = np.asanyarray(intensities_obs)
@@ -114,8 +123,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
     if supervised:
         beta_draws = np.empty((n_iterations, 2))
         concentration_draws = np.empty((n_iterations, n_proteins))
-        mean_concentration_draws = np.empty((n_iterations))
-        prec_concentration_draws = np.empty((n_iterations))
+        mean_concentration_draws = np.zeros((n_iterations))
+        prec_concentration_draws = np.zeros((n_iterations))
 
     # Peptide- and protein-level means
     gamma_draws = np.empty((n_iterations, n_peptides))
@@ -210,11 +219,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         # And, initialize the concentration draws using the updates mu's
         concentration_draws[0] = (mu_draws[0] - beta_draws[0,0]) / \
                 beta_draws[0,1]
-        
-        # Initialize hyperparameters on concentration distribution
-        mean_concentration_draws[0] = np.mean(concentration_draws[0])
-        prec_concentration_draws[0] = 1. / np.var(concentration_draws[0])
-        
+
+        if concentration_dist:
+            # Initialize hyperparameters on concentration distribution
+            mean_concentration_draws[0] = np.mean(concentration_draws[0])
+            prec_concentration_draws[0] = 1. / np.var(concentration_draws[0])
 
     # Peptide-level means using mean observed intensity; imputing missing
     # peptides as protein observed means
@@ -298,14 +307,29 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                             weights=gamma_draws[t])
         mean_gamma_by_protein /= n_peptides_per_protein
 
+        # (4) Update protein-level concentrations
         if supervised:
-            # (4) Update protein-level concentrations
-            # (4a) Update coefficients given concentrations. Gibbs step.
-            beta_draws[t] = updates.rgibbs_beta(
-                concentrations=concentration_draws[t-1],
-                gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
-                n_peptides=n_peptides_per_protein,
-                **cfg['priors']['beta_concentration'])
+            if concentration_dist:
+                # (4a) Update coefficients given concentrations. Gibbs step.
+                # Only yields sane answers if modeling distribution of
+                # concentrations.
+                beta_draws[t] = updates.rgibbs_beta(
+                    concentrations=concentration_draws[t-1],
+                    gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
+                    n_peptides=n_peptides_per_protein,
+                    **cfg['priors']['beta_concentration'])
+            else:
+                # (4a) Update coefficients given concentrations. Gibbs step.
+                # Rao-Blackwellized version, implicitly scaling prior on
+                # $\beta_1$ by $|\beta_1|^{n_{mis}}
+                beta_draws[t] = updates.rgibbs_beta(
+                    concentrations=known_concentrations,
+                    gamma_bar=mean_gamma_by_protein[
+                        mapping_known_concentrations],
+                    tausq=tausq_draws[t - 1][mapping_known_concentrations],
+                    n_peptides=n_peptides_per_protein[
+                        mapping_known_concentrations],
+                    **cfg['priors']['beta_concentration'])
 
             # (4b) Update concentrations given coefficients. Gibbs step.
             concentration_draws[t] = updates.rgibbs_concentration(
@@ -316,16 +340,17 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
             concentration_draws[t][mapping_known_concentrations] = \
                     known_concentrations
 
-            # (4c) Update concentration distribution hyperparameters
-            mean_concentration_draws[t] = np.random.normal(
-                loc=np.mean(concentration_draws[t]),
-                scale=np.sqrt(1. / prec_concentration_draws[t-1] / n_proteins),
-                size=1)
-            prec_concentration_draws[t] = 1. / updates.rgibbs_variances(
-                rss=np.sum((concentration_draws[t] -
-                            mean_concentration_draws[t])**2),
-                n=n_proteins,
-                **cfg['priors']['prec_concentration'])
+            if concentration_dist:
+                # (4c) Update concentration distribution hyperparameters
+                mean_concentration_draws[t] = np.random.normal(
+                    loc=np.mean(concentration_draws[t]),
+                    scale=np.sqrt(1. / prec_concentration_draws[t-1] /
+                                  n_proteins), size=1)
+                prec_concentration_draws[t] = 1. / updates.rgibbs_variances(
+                    rss=np.sum((concentration_draws[t] -
+                                mean_concentration_draws[t])**2),
+                    n=n_proteins,
+                    **cfg['priors']['prec_concentration'])
 
             # Set mu based on concentrations and betas
             mu_draws[t] = \
@@ -431,9 +456,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
     if supervised:
         draws.update({
             'beta': beta_draws,
-            'concentration': concentration_draws,
-            'mean_concentration': mean_concentration_draws,
-            'var_concentration': 1. / prec_concentration_draws})
+            'concentration': concentration_draws})
+        if concentration_dist:
+            draws.update({
+                'mean_concentration': mean_concentration_draws,
+                'var_concentration': 1. / prec_concentration_draws})
 
     return (draws, accept_stats)
 

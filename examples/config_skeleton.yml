@@ -53,6 +53,20 @@ priors:
     mu:
         prior_mean: 0.
         prior_prec: 0.
+    # Use semi-supervised algorithm?
+    supervised: True
+    # Prior for coefficients of concentration/intensity relationships
+    beta_concentration:
+        prior_mean: [0., 1.]
+        prior_prec: [0., 0.]
+        prior_trunc_b1: [0., 2.]
+    # Model distribution over concentrations? If not, prior on $\beta_1$ is
+    # scaled by $|\beta_1|^{n_{mis}}$.
+    concentration_dist: False
+    # Prior on concentration distribution hyperparameters
+    prec_concentration:
+        prior_shape: 1.
+        prior_rate: 0.
 
 # Section for initializations
 init:
