@@ -202,6 +202,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                total_intensity_obs_per_peptide /
                                np.maximum(1, n_obs_states_per_peptide)) /
                    n_obs_peptides_per_protein)
+    mu_draws[0, n_obs_peptides_per_protein < 1] = np.nanmin(mu_draws[0])
 
     if supervised:
         # Simple initialization for supervised algorithm
