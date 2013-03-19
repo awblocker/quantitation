@@ -613,7 +613,7 @@ def worker(comm, rank, data, cfg):
     #   - 6:8 : eta
     #   - 8   : p_rnd_cen
     # If supervised, 4 additional entries are used:
-    #   - 9:10: beta
+    #   - 9:11: beta
     #   - 11  : mean_concentration
     #   - 12  : prec_concentration
     params_shared = np.empty(9 + 4 * supervised, dtype=np.double)
@@ -642,7 +642,7 @@ def worker(comm, rank, data, cfg):
             p_rnd_cen = params_shared[8]
 
             if supervised:
-                beta[:] = params_shared[9:10]
+                beta = params_shared[9:11]
                 mean_concentration = params_shared[11]
                 prec_concentration = params_shared[12]
         elif task == TAGS['INIT']:
@@ -699,7 +699,7 @@ def worker(comm, rank, data, cfg):
                     gamma_bar=mu_draws[0, mapping_known_concentrations],
                     tausq=tausq_draws[0, mapping_known_concentrations],
                     n_peptides=n_peptides_per_protein[
-                        mapping_known_concentrations])
+                        mapping_known_concentrations], MPIROOT=MPIROOT)
         elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
             #   all other parameters. Exact draw via rejection samplers.
@@ -848,7 +848,7 @@ def worker(comm, rank, data, cfg):
                     comm=comm, concentrations=concentration_draws[t],
                     gamma_bar=mean_gamma_by_protein,
                     tausq=tausq_draws[t],
-                    n_peptides=n_peptides_per_protein)
+                    n_peptides=n_peptides_per_protein, MPIROOT=MPIROOT)
             else:
                 updates_parallel.rgibbs_worker_beta(
                     comm=comm, concentrations=known_concentrations,
@@ -856,12 +856,12 @@ def worker(comm, rank, data, cfg):
                         mapping_known_concentrations],
                     tausq=tausq_draws[t, mapping_known_concentrations],
                     n_peptides=n_peptides_per_protein[
-                        mapping_known_concentrations])
+                        mapping_known_concentrations], MPIROOT=MPIROOT)
         elif task == TAGS['CONCENTRATION_DIST']:
             # Run distributed Gibbs step for hyperparameters of concentration
             # distribution
             updates_parallel.rgibbs_worker_concentration_dist(
-                comm=comm, concentrations=known_concentrations)
+                comm=comm, concentrations=known_concentrations, MPIROOT=MPIROOT)
         elif task == TAGS['SAVE']:
             # Construct path for worker-specific results
             path_worker = cfg['output']['pattern_results_worker'] % rank

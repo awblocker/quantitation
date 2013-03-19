@@ -521,7 +521,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
     # Synchronization of the resulting draw is handled separately.
 
 
-def rmh_master_glm_coef(comm, b_prev, MPIROOT=0., propDf=5., method='emulate',
+def rmh_master_glm_coef(comm, b_prev, MPIROOT=0, propDf=5., method='emulate',
                         cov=emulate.cov_sqexp, n_iter_refine=2,
                         final_info_refine=1):
     '''
@@ -643,7 +643,8 @@ def rgibbs_master_p_rnd_cen(comm, MPIROOT=0, prior_a=1., prior_b=1.):
     return p_rnd_cen
 
 
-def rgibbs_worker_beta(comm, concentrations, gamma_bar, tausq, n_peptides):
+def rgibbs_worker_beta(comm, concentrations, gamma_bar, tausq, n_peptides,
+                       MPIROOT=0):
     '''
     Worker components of Gibbs update for beta parameter of
     concentration-intensity relationship. Can be used for both the
@@ -682,7 +683,7 @@ def rgibbs_worker_beta(comm, concentrations, gamma_bar, tausq, n_peptides):
     # The resulting draw of beta is not brought back to the workers until the
     # next synchronization event.
 
-def rgibbs_master_beta(comm, prior_mean=np.array([0., 1.]),
+def rgibbs_master_beta(comm, MPIROOT=0, prior_mean=np.array([0., 1.]),
                        prior_prec=np.array([0., 0.]),
                        prior_trunc_b1=(-np.Inf, np.Inf)):
     # Save dimensions
@@ -698,19 +699,19 @@ def rgibbs_master_beta(comm, prior_mean=np.array([0., 1.]),
     
     # Draw beta_1 from truncated distribution
     beta = np.empty(2)
-    beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + estimate['b'][1]
+    beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + b_hat[1]
     while beta[1] < prior_trunc_b1[0] or beta[1] > prior_trunc_b1[1]:
-        beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + estimate['b'][1]
+        beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + b_hat[1]
 
     # Draw beta_0 from conditional posterior given beta_1
     beta[0] = np.random.randn(1) * \
             np.sqrt(Sigma[0,0] - Sigma[0,1]**2 / Sigma[1,1]) + \
-            estimate['b'][0] + Sigma[0,1] / Sigma[1,1] * \
-            (beta[1] - estimate['b'][1])
+            b_hat[0] + Sigma[0,1] / Sigma[1,1] * \
+            (beta[1] - b_hat[1])
     
     return beta
 
-def rgibbs_worker_concentration_dist(comm, concentrations):
+def rgibbs_worker_concentration_dist(comm, concentrations, MPIROOT=0):
     '''
     Gibbs update for hyperparameters of concentration distribution. Very
     simple, sending mean, variance, and n to master. n is a vital part of the
@@ -729,7 +730,8 @@ def rgibbs_worker_concentration_dist(comm, concentrations):
     # All subsequent computation is handled on the master node.
     # Synchronization of the resulting draw is handled separately.
 
-def rgibbs_master_concentration_dist(comm, prior_shape=1., prior_rate=0.):
+def rgibbs_master_concentration_dist(comm, MPIROOT=0, prior_shape=1.,
+                                     prior_rate=0.):
     '''
     Gibbs update for hyperparameters of concentration distribution. Very
     simple, sending mean, variance, and n to master. n is a vital part of the
