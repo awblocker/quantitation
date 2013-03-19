@@ -485,6 +485,12 @@ def master(comm, data, cfg):
              'rate_tausq': rate_tausq,
              'shape_sigmasq': shape_sigmasq,
              'rate_sigmasq': rate_sigmasq}
+    if supervised:
+        draws.update({
+            'beta': beta_draws,
+            'mean_concentration': mean_concentration_draws,
+            'prec_concentration': prec_concentration_draws})
+
     return (draws, accept_stats, data['mapping_peptides'])
 
 
@@ -866,13 +872,16 @@ def worker(comm, rank, data, cfg):
             # Construct path for worker-specific results
             path_worker = cfg['output']['pattern_results_worker'] % rank
 
-            # Setup draws dictionary
+            # Setup draws to return
             draws = {'mu': mu_draws,
                      'gamma': gamma_draws,
                      'sigmasq': sigmasq_draws,
                      'tausq': tausq_draws,
                      'n_cen_states_per_peptide': n_cen_states_per_peptide_draws,
                      }
+            if supervised:
+                draws.update({
+                    'concentration': concentration})
 
             lib.write_to_hdf5(
                 path=path_worker, compress=cfg['output']['compress'],
@@ -886,6 +895,10 @@ def worker(comm, rank, data, cfg):
              'tausq': tausq_draws,
              'n_cen_states_per_peptide': n_cen_states_per_peptide_draws,
              }
+    if supervised:
+        draws.update({
+            'concentration': concentration})
+
     return (draws, data['mapping_peptides'],
             data['proteins_worker'], data['peptides_worker'])
 
