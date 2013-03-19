@@ -641,3 +641,115 @@ def rgibbs_master_p_rnd_cen(comm, MPIROOT=0, prior_a=1., prior_b=1.):
     p_rnd_cen = np.random.beta(a=n_rnd_cen + prior_a,
                                b=n_states - n_rnd_cen + prior_b)
     return p_rnd_cen
+
+
+def rgibbs_worker_beta(comm, concentrations, gamma_bar, tausq, n_peptides):
+    '''
+    Worker components of Gibbs update for beta parameter of
+    concentration-intensity relationship. Can be used for both the
+    Rao-Blackwellized and conditional versions.
+
+    Acts as a wrapper around the posterior_approx_distributed logic, as the
+    likelihood is exactly Gaussian. Adds special handling for the case where
+    no concentrations are provided, sending 0s for the estimate and precision.
+    '''
+    # Save dimensions
+    p = 2
+
+    if np.size(concentrations) < 1:
+        # No observations for the model, send zeros
+        approx = np.zeros(p + p*(p+1)/2)
+    else:
+        # Get sufficient statistics from linear regression
+        # Avoiding actual regression routine because of reduced-rank cases
+        sqrt_w = np.sqrt(n_peptides / tausq)
+        X = np.ones((np.size(concentrations), p))
+        X[:, 1] = concentrations
+        Xw = (X.T * sqrt_w).T
+        yw = gamma_bar*sqrt_w
+        
+        XwtXw = np.dot(Xw.T, Xw)
+        Xwtyw = np.dot(Xw.T, yw)
+        
+        # Condense approximation to a single vector for reduction
+        approx = np.r_[Xwtyw, XwtXw[np.tril_indices(p)]]
+
+    # Combine with other approximations on master.
+    comm.Reduce([approx, MPI.DOUBLE], None,
+                op=MPI.SUM, root=MPIROOT)
+    
+    # All subsequent computation is done on the master node
+    # The resulting draw of beta is not brought back to the workers until the
+    # next synchronization event.
+
+def rgibbs_master_beta(comm, prior_mean=np.array([0., 1.]),
+                       prior_prec=np.array([0., 0.]),
+                       prior_trunc_b1=(-np.Inf, np.Inf)):
+    # Save dimensions
+    p = 2
+
+    # Aggregating local results from workers.
+    # This assumes that rgibbs_worker_beta() has been called on all workers.
+    b_hat, prec = posterior_approx_distributed(comm=comm, dim_param=p,
+                                               MPIROOT=MPIROOT)
+
+    # Get posterior covariance
+    Sigma = linalg.solve(prec, np.eye(p), sym_pos=True)
+    
+    # Draw beta_1 from truncated distribution
+    beta = np.empty(2)
+    beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + estimate['b'][1]
+    while beta[1] < prior_trunc_b1[0] or beta[1] > prior_trunc_b1[1]:
+        beta[1] = np.random.randn(1) * np.sqrt(Sigma[1,1]) + estimate['b'][1]
+
+    # Draw beta_0 from conditional posterior given beta_1
+    beta[0] = np.random.randn(1) * \
+            np.sqrt(Sigma[0,0] - Sigma[0,1]**2 / Sigma[1,1]) + \
+            estimate['b'][0] + Sigma[0,1] / Sigma[1,1] * \
+            (beta[1] - estimate['b'][1])
+    
+    return beta
+
+def rgibbs_worker_concentration_dist(comm, concentrations):
+    '''
+    Gibbs update for hyperparameters of concentration distribution. Very
+    simple, sending mean, variance, and n to master. n is a vital part of the
+    sufficient statistic here.
+    '''
+    # Compute sufficient statistics
+    n = np.size(concentrations)
+    s = np.r_[n * np.mean(concentrations),
+              n * np.var(concentrations, ddof=0),
+              n]
+
+    # Combine on master
+    comm.Reduce([s, MPI.DOUBLE], None,
+                op=MPI.SUM, root=MPIROOT)
+
+    # All subsequent computation is handled on the master node.
+    # Synchronization of the resulting draw is handled separately.
+
+def rgibbs_master_concentration_dist(comm, prior_shape=1., prior_rate=0.):
+    '''
+    Gibbs update for hyperparameters of concentration distribution. Very
+    simple, sending mean, variance, and n to master. n is a vital part of the
+    sufficient statistic here.
+    '''
+    # Aggregate sufficient statistics from workers
+    s = np.zeros(3)
+    buf = np.zeros(3)
+    comm.Reduce([buf, MPI.DOUBLE], [s, MPI.DOUBLE],
+                op=MPI.SUM, root=MPIROOT)
+    
+    post_mean = s[0] / s[2]
+
+    prec_concentration = np.random.gamma(
+        shape=prior_shape + (s[2] - 1.) / 2.,
+        scale=1. / (prior_rate + s[1] / 2.))
+    mean_concentration = np.random.normal(
+        loc=post_mean,
+        scale=np.sqrt(1. / prec_concentration / s[2]))
+    
+    return (mean_concentration, prec_concentration)
+
+
