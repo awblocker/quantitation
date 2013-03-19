@@ -23,6 +23,9 @@ TAGS = ['STOP',      # Stop iterations
         'SIGMA',     # Run distributed MH update on sigmasq hyperparams
         'NSTATES',   # Run distributed MH update on n_states hyperparams
         'ETA',       # Run distributed MH update on eta (censoring coef)
+        'BETA',      # Run distributed Gibbs update on beta hyperparams
+        'CONCENTRATION_DIST',  # Run distributed Gibbs update on concentration
+                               # hyperparameters
         'SAVE'       # Save results
         ]
 TAGS = dict([(state, tag) for tag, state in enumerate(TAGS)])
@@ -80,6 +83,13 @@ def load_data(cfg, rank=None, n_workers=None):
             the original dataset) of the peptides assigned to the given worker.
             Only provided if rank > 0.
     '''
+    # Determine whether algorithm is running with supervision
+    try:
+        supervised = cfg['priors']['supervised']
+    except:
+        print >> sys.stderr, 'Defaulting to unsupervised algorithm'
+        supervised = False
+
     # Load peptide to protein mapping
     mapping_peptides = np.loadtxt(cfg['data']['path_mapping_peptides'],
                                   dtype=np.int)
@@ -115,11 +125,24 @@ def load_data(cfg, rank=None, n_workers=None):
         raise ValueError('State to peptide mapping (mapping_states_obs)'
                          ' is not valid')
 
+    # Load concentration data if supervised
+    if supervised:
+        data_concentrations = np.loadtxt(
+            cfg['data']['path_concentrations'],
+            dtype=[('protein', np.int),
+                   ('concentration', np.float)],
+            unpack=True)
+        mapping_known_concentrations, known_concentrations = data_concentrations
+
     if rank is None:
         # Return everything
         data = {'intensities_obs': intensities_obs,
                 'mapping_states_obs': mapping_states_obs,
                 'mapping_peptides': mapping_peptides}
+        if supervised:
+            data.update({
+                'known_concentrations': known_concentrations,
+                'mapping_known_concentrations': mapping_known_concentrations})
         return data
 
     # Compute observed mean intensity by protein
@@ -175,6 +198,23 @@ def load_data(cfg, rank=None, n_workers=None):
     for peptide_original, peptide_worker in reindex.iteritems():
         mask_edit = (mapping_states_obs[mask_states] == peptide_original)
         mapping_states_obs_worker[mask_edit] = peptide_worker
+    
+    if supervised:
+        # Subset and reindex known concentrations
+        known_concentrations_in_sample = np.where(np.in1d(
+            mapping_known_concentrations, unique_proteins,
+            assume_unique=True))[0]
+        known_concentrations_worker = known_concentrations[
+            known_concentrations_in_sample]
+        
+        mapping_known_concentrations_worker = np.empty(
+            known_concentrations_worker.size, dtype=np.int)
+        reindex = zip(
+            mapping_known_concentrations[known_concentrations_in_sample],
+            range(known_concentrations_worker.size))
+        for protein_original, protein_worker in reindex:
+            mapping_known_concentrations_worker[protein_worker] = \
+                    np.where(unique_proteins == protein_original)[0][0]
 
     # Build dictionary of data to return
     data = {'intensities_obs': intensities_obs_worker,
@@ -182,13 +222,18 @@ def load_data(cfg, rank=None, n_workers=None):
             'mapping_peptides': mapping_peptides_worker,
             'proteins_worker': unique_proteins,
             'peptides_worker': select_peptides}
+    if supervised:
+        data.update({
+            'known_concentrations': known_concentrations_worker,
+            'mapping_known_concentrations': mapping_known_concentrations_worker}
+        )
     return data
 
 
 def master(comm, data, cfg):
     '''
-    Master node process for parallel MCMC. Coordinates draws, handles all
-    region-level parameter draws, and collects results.
+    Master node process for parallel MCMC. Coordinates draws and collects
+    results.
 
     Parameters
     ----------
@@ -218,6 +263,22 @@ def master(comm, data, cfg):
     n_workers = comm.Get_size() - 1
     if n_workers < 1:
         raise ValueError('Need at least one worker')
+    
+    # Determine whether algorithm is running with supervision
+    try:
+        supervised = cfg['priors']['supervised']
+    except:
+        print >> sys.stderr, 'Defaulting to unsupervised algorithm'
+        supervised = False
+    
+    # If supervised, determine whether to model distribution of concentrations
+    # If this is False, prior on $\beta_1$ is scaled by $|\beta_1|^{n_{mis}}$.
+    if supervised:
+        try:
+            concentration_dist = cfg['priors']['concentration_dist']
+        except:
+            print >> sys.stderr, 'Defaulting to flat prior on concentrations'
+            concentration_dist = False
 
     # Extract number of iterations from cfg
     n_iterations = cfg['settings']['n_iterations']
@@ -239,6 +300,14 @@ def master(comm, data, cfg):
     # Number of states model parameters
     r = np.empty(n_iterations)
     lmbda = np.empty(n_iterations)
+
+    if supervised:
+        # Coefficients for concentration-intensity relationship
+        beta_draws = np.zeros((n_iterations, 2))
+        # Hyperparameters for concentration distribution. Must be initialized to
+        # zero.
+        mean_concentration_draws = np.zeros(n_iterations)
+        prec_concentration_draws = np.zeros(n_iterations)
 
     # Compute initial values for MCMC iterations
 
@@ -273,6 +342,10 @@ def master(comm, data, cfg):
                           r[0], lmbda[0],
                           eta_draws[0],
                           p_rnd_cen[0]]
+    if supervised:
+        params_shared = np.r_[params_shared, beta_draws[0],
+                              mean_concentration_draws[0],
+                              prec_concentration_draws[0]]
 
     for worker in xrange(1, n_workers + 1):
         comm.Send([np.array(0), MPI.INT], dest=worker, tag=TAGS['SYNC'])
@@ -288,6 +361,11 @@ def master(comm, data, cfg):
     comm.Reduce([buf, MPI.DOUBLE], [r_lmbda_init, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
     r[0], lmbda[0] = r_lmbda_init / n_workers
+    
+    if supervised:
+        # Initialize beta with Rao-Blackwellized update under default prior
+        beta_draws[0] = updates_parallel.rgibbs_master_beta(
+            comm=comm, **cfg['priors']['beta_concentration'])
 
     # Initialize dictionary for acceptance statistics
     accept_stats = {'sigmasq_dist': 0,
@@ -305,6 +383,10 @@ def master(comm, data, cfg):
                               r[t - 1], lmbda[t - 1],
                               eta_draws[t - 1],
                               p_rnd_cen[t - 1]]
+        if supervised:
+            params_shared = np.r_[params_shared, beta_draws[t - 1],
+                                  mean_concentration_draws[t - 1],
+                                  prec_concentration_draws[t - 1]]
 
         for worker in xrange(1, n_workers + 1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['SYNC'])
@@ -362,10 +444,28 @@ def master(comm, data, cfg):
         p_rnd_cen[t] = updates_parallel.rgibbs_master_p_rnd_cen(
             comm=comm, MPIROOT=MPIROOT,
             **cfg['priors']['p_rnd_cen'])
+        
+        if supervised:
+            # (7) Update concentration-intensity relationship coefficients.
+            #   Distributed Gibbs step.
+            for worker in xrange(1, n_workers + 1):
+                comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['BETA'])
+            beta_draws[t] = updates_parallel.rgibbs_master_beta(
+                comm=comm, **cfg['priors']['beta_concentration'])
+            
+            if concentration_dist:
+                # (8) Update concentration distribution hyperparameters
+                for worker in xrange(1, n_workers + 1):
+                    comm.Send([np.array(t), MPI.INT], dest=worker,
+                              tag=TAGS['CONCENTRATION_DIST'])
+                    buf = updates_parallel.rgibbs_master_concentration_dist(
+                        comm=comm, **cfg['priors']['prec_concentration'])
+                    mean_concentration_draws[t] = buf[0]
+                    prec_concentration_draws[t] = buf[1]
 
         # Verbose output
         if (cfg['settings']['verbose'] > 0 and
-                t % cfg['settings']['verbose_interval'] == 0):
+            t % cfg['settings']['verbose_interval'] == 0):
             print >> sys.stderr, 'Iteration %d complete' % t
 
     # Post-sampling processing and clean-up
@@ -424,10 +524,30 @@ def worker(comm, rank, data, cfg):
             A 1d integer array of length n_peptides containing the indices (in
             the original dataset) of the peptides assigned to the given worker.
     '''
+    # Determine whether algorithm is running with supervision
+    try:
+        supervised = cfg['priors']['supervised']
+    except:
+        print >> sys.stderr, 'Defaulting to unsupervised algorithm'
+        supervised = False
+    
+    # If supervised, determine whether to model distribution of concentrations
+    # If this is False, prior on $\beta_1$ is scaled by $|\beta_1|^{n_{mis}}$.
+    if supervised:
+        try:
+            concentration_dist = cfg['priors']['concentration_dist']
+        except:
+            print >> sys.stderr, 'Defaulting to flat prior on concentrations'
+            concentration_dist = False
+
     # Create references to relevant data entries in local namespace
     mapping_peptides = data['mapping_peptides']
     intensities_obs = data['intensities_obs']
     mapping_states_obs = data['mapping_states_obs']
+    # Data specific to the semi-supervised algorithm
+    if supervised:
+        known_concentrations = data['known_concentrations']
+        mapping_known_concentrations = data['mapping_known_concentrations']
 
     # Extract dimensions from input
 
@@ -464,6 +584,10 @@ def worker(comm, rank, data, cfg):
     gamma_draws = np.empty((n_iterations, n_peptides))
     mu_draws = np.empty((n_iterations, n_proteins))
 
+    # Concentrations, if supervised
+    if supervised:
+        concentration_draws = np.empty((n_iterations, n_proteins))
+
     # Number of censored states per peptide
     n_cen_states_per_peptide_draws = np.zeros((n_iterations, n_peptides),
                                               dtype=np.integer)
@@ -488,7 +612,11 @@ def worker(comm, rank, data, cfg):
     #   - 4:6 : r, lmbda
     #   - 6:8 : eta
     #   - 8   : p_rnd_cen
-    params_shared = np.empty(9, dtype=np.double)
+    # If supervised, 4 additional entries are used:
+    #   - 9:10: beta
+    #   - 11  : mean_concentration
+    #   - 12  : prec_concentration
+    params_shared = np.empty(9 + 4 * supervised, dtype=np.double)
 
     # Prepare to receive tasks
     working = True
@@ -512,6 +640,11 @@ def worker(comm, rank, data, cfg):
             r, lmbda = params_shared[4:6]
             eta = params_shared[6:8]
             p_rnd_cen = params_shared[8]
+
+            if supervised:
+                beta[:] = params_shared[9:10]
+                mean_concentration = params_shared[11]
+                prec_concentration = params_shared[12]
         elif task == TAGS['INIT']:
             # Compute initial values for MCMC iterations
 
@@ -521,6 +654,7 @@ def worker(comm, rank, data, cfg):
                 np.bincount(mapping_peptides, total_intensity_obs_per_peptide /
                             np.maximum(1, n_obs_states_per_peptide)) /
                 n_obs_peptides_per_protein)
+            mu_draws[0, n_obs_peptides_per_protein < 1] = np.nanmin(mu_draws[0])
 
             # Peptide-level means using mean observed intensity; imputing
             # missing peptides as protein observed means
@@ -546,9 +680,9 @@ def worker(comm, rank, data, cfg):
             # number of observed peptides; very crude, but not altogether
             # terrible. Note that this ignores the +1 location shift in the
             # actual n_states distribution.
-            kwargs = {'x': n_obs_states_per_peptide[n_obs_states_per_peptide > 0]
-                      - 1,
-                      'transform': True}
+            kwargs = {
+                'x': n_obs_states_per_peptide[n_obs_states_per_peptide > 0] - 1,
+                'transform': True}
             kwargs.update(cfg['priors']['n_states_dist'])
             r, lmbda = lib.map_estimator_nbinom(**kwargs)
 
@@ -556,6 +690,16 @@ def worker(comm, rank, data, cfg):
             # Values synchronize at first iteration during SYNC task.
             comm.Reduce([np.array([r, lmbda]), MPI.DOUBLE], None,
                         op=MPI.SUM, root=MPIROOT)
+
+            if supervised:
+                # Run Gibbs update on concentration-intensity coefficients using
+                # noninformative prior.
+                updates_parallel.rgibbs_worker_beta(
+                    comm=comm, concentrations=known_concentrations,
+                    gamma_bar=mu_draws[0, mapping_known_concentrations],
+                    tausq=tausq_draws[0, mapping_known_concentrations],
+                    n_peptides=n_peptides_per_protein[
+                        mapping_known_concentrations])
         elif task == TAGS['LOCAL']:
             # (1) Draw missing data (n_cen and censored state intensities) given
             #   all other parameters. Exact draw via rejection samplers.
@@ -592,9 +736,9 @@ def worker(comm, rank, data, cfg):
                 **kwargs)
 
             # Sum observed intensities per peptide
-            total_intensity_cen_per_peptide = np.bincount(mapping_states_cen,
-                                                          weights=intensities_cen,
-                                                          minlength=n_peptides)
+            total_intensity_cen_per_peptide = np.bincount(
+                mapping_states_cen, weights=intensities_cen,
+                minlength=n_peptides)
 
             # Compute mean intensities per peptide
             mean_intensity_per_peptide = ((total_intensity_obs_per_peptide +
@@ -610,11 +754,23 @@ def worker(comm, rank, data, cfg):
             mean_gamma_by_protein = np.bincount(mapping_peptides,
                                                 weights=gamma_draws[t])
             mean_gamma_by_protein /= n_peptides_per_protein
-
-            # (3) Update protein-level mean parameters (mu). Gibbs step.
-            mu_draws[t] = updates_serial.rgibbs_mu(
-              gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
-              n_peptides=n_peptides_per_protein, **cfg['priors']['mu'])
+            
+            if supervised:
+                # (3) Update concentrations given coefficients. Gibbs step.
+                concentration_draws[t] = updates_serial.rgibbs_concentration(
+                    gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
+                    n_peptides=n_peptides_per_protein, beta=beta,
+                    mean_concentration=mean_concentration,
+                    prec_concentration=prec_concentration)
+                concentration_draws[t][mapping_known_concentrations] = \
+                        known_concentrations
+            
+                mu_draws[t] = beta[0] + beta[1] * concentration_draws[t]
+            else:
+                # (3) Update protein-level mean parameters (mu). Gibbs step.
+                mu_draws[t] = updates_serial.rgibbs_mu(
+                  gamma_bar=mean_gamma_by_protein, tausq=tausq_draws[t - 1],
+                  n_peptides=n_peptides_per_protein, **cfg['priors']['mu'])
 
             # (4) Update state-level variance parameters (sigmasq). Gibbs step.
             rss_by_state = ((intensities_obs -
@@ -684,6 +840,28 @@ def worker(comm, rank, data, cfg):
             updates_parallel.rgibbs_worker_p_rnd_cen(
               comm=comm, n_rnd_cen=np.sum(W, dtype=np.int), n_states=n_states,
               MPIROOT=MPIROOT)
+        elif task == TAGS['BETA']:
+            # Run distributed Gibbs step for coefficients of
+            # concentration-intensity relationship
+            if concentration_dist:
+                updates_parallel.rgibbs_worker_beta(
+                    comm=comm, concentrations=concentration_draws[t],
+                    gamma_bar=mean_gamma_by_protein,
+                    tausq=tausq_draws[t],
+                    n_peptides=n_peptides_per_protein)
+            else:
+                updates_parallel.rgibbs_worker_beta(
+                    comm=comm, concentrations=known_concentrations,
+                    gamma_bar=mean_gamma_by_protein[
+                        mapping_known_concentrations],
+                    tausq=tausq_draws[t, mapping_known_concentrations],
+                    n_peptides=n_peptides_per_protein[
+                        mapping_known_concentrations])
+        elif task == TAGS['CONCENTRATION_DIST']:
+            # Run distributed Gibbs step for hyperparameters of concentration
+            # distribution
+            updates_parallel.rgibbs_worker_concentration_dist(
+                comm=comm, concentrations=known_concentrations)
         elif task == TAGS['SAVE']:
             # Construct path for worker-specific results
             path_worker = cfg['output']['pattern_results_worker'] % rank
@@ -796,6 +974,13 @@ def combine_results(result_master, list_results_workers, cfg):
             merging worker-level results.
 
     '''
+    # Determine whether algorithm is running with supervision
+    try:
+        supervised = cfg['priors']['supervised']
+    except:
+        print >> sys.stderr, 'Defaulting to unsupervised algorithm'
+        supervised = False
+    
     # Reference master-specific output in local scope
     draws_master = result_master['draws']
     accept_stats = result_master['accept_stats']
@@ -818,6 +1003,15 @@ def combine_results(result_master, list_results_workers, cfg):
         mu[:, proteins_worker] = result_worker['draws']['mu']
         sigmasq[:, proteins_worker] = result_worker['draws']['sigmasq']
         tausq[:, proteins_worker] = result_worker['draws']['tausq']
+
+    # Handle concentrations if running semi-supervised
+    if supervised:
+        concentration = np.empty((n_iterations, n_proteins))
+
+        for result_worker in list_results_workers:
+            proteins_worker = result_worker['proteins_worker'][...]
+            concentration[:, proteins_worker] = \
+                    result_worker['draws']['concentration']
 
     # Construct combined arrays of peptide-specific draws (gamma &
     # n_cen_states_per_peptide)
@@ -842,8 +1036,14 @@ def combine_results(result_master, list_results_workers, cfg):
     draws['sigmasq'] = sigmasq
     draws['tausq'] = tausq
 
+    # Concentrations, if running semi-supervised
+    if supervised:
+        draws['concentration'] = concentration
+
     # Peptide-specific draws
     draws['gamma'] = gamma
     draws['n_cen_states_per_peptide'] = n_cen_states_per_peptide
 
     return draws, accept_stats, mapping_peptides
+
+
