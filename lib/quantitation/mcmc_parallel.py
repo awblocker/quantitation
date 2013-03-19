@@ -897,7 +897,7 @@ def worker(comm, rank, data, cfg):
              }
     if supervised:
         draws.update({
-            'concentration': concentration})
+            'concentration': concentration_draws})
 
     return (draws, data['mapping_peptides'],
             data['proteins_worker'], data['peptides_worker'])
