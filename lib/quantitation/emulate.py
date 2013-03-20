@@ -148,11 +148,11 @@ def build_emulator(f, center, slope_mean=None, cov=cov_sqexp, grid_radius=1.,
     min_cov : float
       Initial minimum covariance; covariance matrix is truncated at this value.
     cov_step : float
-      Multiplicative step for minimum covariance (upward) if covariance matrix is
-      computationally singular.
+      Multiplicative step for minimum covariance (upward) if covariance matrix
+      is computationally singular.
     max_log10_condition : number
-      Maximum log10 condition number to accept for covariance matrix.  Truncation
-      continues at min_cov * cov_step**k until this is satisfied.
+      Maximum log10 condition number to accept for covariance matrix.
+      Truncation continues at min_cov * cov_step**k until this is satisfied.
 
     Returns
     -------
