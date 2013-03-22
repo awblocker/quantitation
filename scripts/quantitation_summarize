@@ -88,6 +88,14 @@ def main(argv):
         if compress not in (None, 'gzip', 'lzf', 'szip'):
             raise ValueError('Invalid value for compress.')
 
+        # Determine which intervals to compute
+        try:
+            intervals = cfg['summaries']['intervals']
+        except
+            intervals = [0.95]
+            print >> sys.stderr, \
+                    'Interval specification not found. Defaulting to 95%'
+
         # Start timing, if requested
         if timing:
             time_start = time.time()
@@ -123,7 +131,11 @@ def main(argv):
         variances = quantitation.posterior_variances(**draws)
         stderrors = quantitation.posterior_stderrors(**draws)
         medians = quantitation.posterior_medians(**draws)
-        hpd_intervals = quantitation.hpd_intervals(prob=0.95, **draws)
+
+        hpd_intervals = {}
+        for p in intervals:
+            hpd_intervals[p] = quantitation.hpd_intervals(prob=p, **draws)
+
         modes = quantitation.hpd_intervals(prob=n_draws**(-0.25), **draws)
         for k, v in modes.iteritems():
             modes[k] = np.mean(v, 1)
