@@ -15,5 +15,6 @@ from lib import posterior_variances
 from lib import posterior_stderrors
 from lib import posterior_medians
 from lib import hpd_intervals
+from lib import quantile_intervals
 from lib import write_to_hdf5
 

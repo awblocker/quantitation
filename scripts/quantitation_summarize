@@ -133,8 +133,11 @@ def main(argv):
         medians = quantitation.posterior_medians(**draws)
 
         hpd_intervals = {}
+        quantile_intervals = {}
         for p in intervals:
             hpd_intervals[p] = quantitation.hpd_intervals(prob=p, **draws)
+            quantile_intervals[p] = quantitation.quantile_intervals(prob=p,
+                                                                    **draws)
 
         modes = quantitation.hpd_intervals(prob=n_draws**(-0.25), **draws)
         for k, v in modes.iteritems():
@@ -146,7 +149,8 @@ def main(argv):
             fname=path_summaries, compress=compress,
             effective_sample_sizes=effective_sample_sizes, means=means,
             variances=variances, stderror=stderrors,
-            medians=medians, hpd_intervals=hpd_intervals, modes=modes,
+            medians=medians, hpd_intervals=hpd_intervals,
+            quantile_intervals=quantile_intervals, modes=modes,
             accept_stats=results['accept_stats'],
             mapping_peptides=results['mapping_peptides'])
         
