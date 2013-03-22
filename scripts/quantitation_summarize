@@ -91,7 +91,7 @@ def main(argv):
         # Determine which intervals to compute
         try:
             intervals = cfg['summaries']['intervals']
-        except
+        except:
             intervals = [0.95]
             print >> sys.stderr, \
                     'Interval specification not found. Defaulting to 95%'
@@ -135,9 +135,10 @@ def main(argv):
         hpd_intervals = {}
         quantile_intervals = {}
         for p in intervals:
-            hpd_intervals[p] = quantitation.hpd_intervals(prob=p, **draws)
-            quantile_intervals[p] = quantitation.quantile_intervals(prob=p,
-                                                                    **draws)
+            hpd_intervals[str(p)] = quantitation.hpd_intervals(
+                prob=p, **draws)
+            quantile_intervals[str(p)] = quantitation.quantile_intervals(
+                prob=p, **draws)
 
         modes = quantitation.hpd_intervals(prob=n_draws**(-0.25), **draws)
         for k, v in modes.iteritems():

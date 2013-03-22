@@ -1424,6 +1424,7 @@ def quantile_intervals(prob=0.95, **kwargs):
         n_draws = draws.shape[0]
         lower = int(round(n_draws * lower_prob))
         upper = min(int(round(n_draws * upper_prob)), n_draws - 1)
+        qint = np.empty((draws.shape[1], 2), draws.dtype)
         qint[:, 0] = [v[lower] for v in sorted_draws.T]
         qint[:, 1] = [v[upper] for v in sorted_draws.T]
         intervals[var] = qint
