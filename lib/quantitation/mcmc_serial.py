@@ -299,8 +299,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         # (3) Update peptide-level mean parameters (gamma). Gibbs step.
         gamma_draws[t] = updates.rgibbs_gamma(
             mu=mu_draws[t - 1][mapping_peptides],
-            tausq=tausq_draws[
-                t - 1][mapping_peptides],
+            tausq=tausq_draws[t - 1][mapping_peptides],
             sigmasq=var_peptide_conditional,
             y_bar=mean_intensity_per_peptide,
             n_states=n_states_per_peptide)
