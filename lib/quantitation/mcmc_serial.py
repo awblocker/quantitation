@@ -176,6 +176,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
               'transform': True}
     kwargs.update(cfg['priors']['n_states_dist'])
     r[0], lmbda[0] = lib.map_estimator_nbinom(**kwargs)
+    lmbda[0] = 1. - lmbda[0]
 
     # Hyperparameters for state- and peptide-level variance distributions
     # directly from cfg
@@ -406,9 +407,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         # (9) Update parameter for negative-binomial n_states distribution (r
         #   and lmbda). Conditional independence-chain MH step.
         result = updates.rmh_nbinom_hyperparams(
-            x=n_states_per_peptide - 1, r_prev=r[ t - 1], p_prev=lmbda[t - 1],
+            x=n_states_per_peptide - 1,
+            r_prev=r[ t - 1], p_prev=1. - lmbda[t - 1],
             **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
+        lmbda[t] = 1. - lmbda[t]
         accept_stats['n_states_dist'] += accept
 
         # (10) Update coefficients of intensity-based probabilistic censoring

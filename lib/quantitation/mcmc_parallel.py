@@ -427,6 +427,7 @@ def master(comm, data, cfg):
             comm=comm, r_prev=r[t - 1], p_prev=lmbda[t - 1],
             **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
+        lmbda[t] = 1. - lmbda[t]
         accept_stats['n_states_dist'] += accept
 
         # (5) Update coefficients of intensity-based probabilistic censoring
@@ -691,6 +692,7 @@ def worker(comm, rank, data, cfg):
                 'transform': True}
             kwargs.update(cfg['priors']['n_states_dist'])
             r, lmbda = lib.map_estimator_nbinom(**kwargs)
+            lmbda = 1. - lmbda
 
             # Combine local estimates at master for initialization.
             # Values synchronize at first iteration during SYNC task.
@@ -817,7 +819,7 @@ def worker(comm, rank, data, cfg):
             # Run distributed MH step for n_states hyperparameters
             updates_parallel.rmh_worker_nbinom_hyperparams(comm=comm,
                                               x=n_states_per_peptide - 1,
-                                              r_prev=r, p_prev=lmbda,
+                                              r_prev=r, p_prev=1. - lmbda,
                                               MPIROOT=MPIROOT,
                                               **cfg['priors']['n_states_dist'])
         elif task == TAGS['ETA']:
