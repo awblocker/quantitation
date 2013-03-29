@@ -73,7 +73,7 @@ def p_censored(x, eta_0, eta_1, log=False, glm_link_name="Logit"):
     Compute probability of intensity-based censoring.
     '''
     if glm_link_name == "Probit":
-        lp = np.log(stats.norm.sf(eta_0 + eta_1 * x))
+        lp = stats.norm.logsf(eta_0 + eta_1 * x)
     elif glm_link_name == "Cloglog":
         lp = -np.exp(eta_0 + eta_1 * x)
     else:
@@ -89,7 +89,7 @@ def p_obs(x, eta_0, eta_1, log=False, glm_link_name="Logit"):
     Compute 1 - probability of intensity-based censoring.
     '''
     if glm_link_name == "Probit":
-        lp = np.log(stats.norm.cdf(eta_0 + eta_1 * x))
+        lp = stats.norm.logcdf(eta_0 + eta_1 * x)
     elif glm_link_name == "Cloglog":
         lp = np.log(1. - np.exp(-np.exp(eta_0 + eta_1 * x)))
     else:
@@ -236,8 +236,9 @@ def deriv_logdt(x, mu=0, scale=1, df=1.):
 def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
     linpred  = eta_0 + eta_1 * x
     if glm_link_name == "Probit":
-        sf_adj = np.maximum(stats.norm.sf(linpred), np.sqrt(EPS))
-        deriv = -stats.norm.pdf(linpred) / sf_adj * eta_1
+        sf_adj = np.maximum(stats.norm.sf(linpred), EPS)
+        pdf = stats.norm.pdf(linpred)
+        deriv = -pdf / sf_adj * eta_1
     elif glm_link_name == "Cloglog":
         deriv = -eta_1 * np.exp(linpred)
     else:
@@ -249,9 +250,9 @@ def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
 def deriv2_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
     linpred  = eta_0 + eta_1 * x
     if glm_link_name == "Probit":
-        sf_adj = np.maximum(stats.norm.sf(linpred), np.sqrt(EPS))
-        deriv2 = eta_1**2 * stats.norm.pdf(linpred) / sf_adj * (
-            linpred - stats.norm.pdf(linpred) / sf_adj)
+        sf_adj = np.maximum(stats.norm.sf(linpred), EPS)
+        pdf = stats.norm.pdf(linpred)
+        deriv2 = eta_1**2 * pdf / sf_adj * (linpred - pdf / sf_adj)
     elif glm_link_name == "Cloglog":
         deriv2 = -eta_1**2 * np.exp(linpred)
     else:
@@ -263,6 +264,10 @@ def deriv2_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
 def deriv3_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
     linpred  = eta_0 + eta_1 * x
     if glm_link_name == "Probit":
+        #deriv1 = deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name)
+        #deriv2 = deriv2_logdcensored(x, mu, sigmasq, eta_0, eta_1,
+        #                             glm_link_name)
+        #deriv3 = -deriv2 * (eta_1 * linpred + 2 * deriv1) - eta_1**2 * deriv1
         deriv3 = None
     elif glm_link_name == "Cloglog":
         deriv3 = -eta_1**3 * np.exp(linpred)
