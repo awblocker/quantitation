@@ -236,7 +236,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
 
     # Instantiate GLM family for eta step
     try:
-        glm_link_name = cfg["priors"]["glm_link"]
+        glm_link_name = cfg["priors"]["glm_link"].title()
     except:
         print >> sys.stderr, "GLM link not specified; defaulting to logit"
         glm_link_name = "Logit"
@@ -259,7 +259,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         kwargs = {'eta_0': eta_draws[t - 1, 0],
                   'eta_1': eta_draws[t - 1, 1],
                   'mu': gamma_draws[t - 1],
-                  'sigmasq': var_peptide_conditional}
+                  'sigmasq': var_peptide_conditional,
+                  'glm_link_name': glm_link_name}
         cen_dist = lib.characterize_censored_intensity_dist(**kwargs)
 
         # (1b) Draw number of censored states per peptide
