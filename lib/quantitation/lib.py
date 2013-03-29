@@ -13,6 +13,7 @@ import numpy as np
 from scipy import special
 from scipy import optimize
 from scipy import linalg
+from scipy import stats
 
 #==============================================================================
 # Useful constants
@@ -67,47 +68,54 @@ def dlnorm(x, mu=0, sigmasq=1, log=False):
         return np.exp(ld)
 
 
-def p_censored(x, eta_0, eta_1, log=False):
+def p_censored(x, eta_0, eta_1, log=False, glm_link_name="Logit"):
     '''
     Compute probability of intensity-based censoring.
     '''
-    lp = -np.log(1. + np.exp(eta_0 + eta_1 * x))
+    if glm_link_name == "Probit":
+        lp = np.log(stats.norm.sf(eta_0 + eta_1 * x))
+    else:
+        lp = -np.log(1. + np.exp(eta_0 + eta_1 * x))
     if log:
         return lp
     else:
         return np.exp(lp)
 
 
-def p_obs(x, eta_0, eta_1, log=False):
+def p_obs(x, eta_0, eta_1, log=False, glm_link_name="Logit"):
     '''
     Compute 1 - probability of intensity-based censoring.
     '''
-    lp = -np.log(1. + np.exp(-eta_0 - eta_1 * x))
+    if glm_link_name == "Probit":
+        lp = np.log(stats.norm.cdf(eta_0 + eta_1 * x))
+    else:
+        lp = -np.log(1. + np.exp(-eta_0 - eta_1 * x))
     if log:
         return lp
     else:
         return np.exp(lp)
 
 
-def dcensored(x, mu, sigmasq, eta_0, eta_1, log=False):
+def dcensored(x, mu, sigmasq, eta_0, eta_1, log=False, glm_link_name="Logit"):
     '''
     Unnormalized density function for censored log-intensities.
     Integrates to p_censored.
     '''
-    ld = dnorm(
-        x, mu, sigmasq, log=True) + p_censored(x, eta_0, eta_1, log=True)
+    ld = dnorm(x, mu, sigmasq, log=True) + \
+            p_censored(x, eta_0, eta_1, log=True, glm_link_name=glm_link_name)
     if log:
         return ld
     else:
         return np.exp(ld)
 
 
-def dobs(x, mu, sigmasq, eta_0, eta_1, log=False):
+def dobs(x, mu, sigmasq, eta_0, eta_1, log=False, glm_link_name="Logit"):
     '''
     Unnormalized density function for observed log-intensities.
     Integrates to p_obs.
     '''
-    ld = dnorm(x, mu, sigmasq, log=True) + p_obs(x, eta_0, eta_1, log=True)
+    ld = dnorm(x, mu, sigmasq, log=True) + \
+            p_obs(x, eta_0, eta_1, log=True, glm_link_name=glm_link_name)
     if log:
         return ld
     else:
@@ -128,11 +136,12 @@ def dt(x, mu=0., scale=1., df=1., log=False):
 
 
 def densityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat, propDf,
-                 normalizing_cnst, log=False):
+                 normalizing_cnst, log=False, glm_link_name="Logit"):
     '''
     Target-proposal ratio for censored intensity rejection sampler.
     '''
-    ld = dcensored(x, mu, sigmasq, eta_0, eta_1, log=True)
+    ld = dcensored(x, mu, sigmasq, eta_0, eta_1, log=True,
+                   glm_link_name=glm_link_name)
     ld -= dt(x, mu=y_hat, scale=approx_sd, df=propDf, log=True)
     ld += np.log(normalizing_cnst)
     if log:
@@ -220,33 +229,49 @@ def deriv_logdt(x, mu=0, scale=1, df=1.):
     return deriv
 
 
-def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1):
-    deriv = (
-        -1. + 1. / (1. + np.exp(eta_0 + eta_1 * x))) * eta_1 - (x - mu) / sigmasq
+def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
+    linpred  = eta_0 + eta_1 * x
+    if glm_link_name == "Probit":
+        sf_adj = np.maximum(stats.norm.sf(linpred), np.sqrt(EPS))
+        deriv = -stats.norm.pdf(linpred) / sf_adj * eta_1
+    else:
+        deriv = (-1. + 1. / (1. + np.exp(linpred))) * eta_1
+    deriv += - (x - mu) / sigmasq
     return deriv
 
 
-def deriv2_logdcensored(x, mu, sigmasq, eta_0, eta_1):
-    deriv2 = (-1. / sigmasq - (eta_1 ** 2 * np.exp(eta_0 + eta_1 * x)) /
-              (1. + np.exp(eta_0 + eta_1 * x)) ** 2)
+def deriv2_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
+    linpred  = eta_0 + eta_1 * x
+    if glm_link_name == "Probit":
+        sf_adj = np.maximum(stats.norm.sf(linpred), np.sqrt(EPS))
+        deriv2 = eta_1**2 * stats.norm.pdf(linpred) / sf_adj * (
+            linpred - stats.norm.pdf(linpred) / sf_adj)
+    else:
+        deriv2 = - (eta_1 ** 2 * np.exp(linpred)) / (1. + np.exp(linpred))**2
+    deriv2 += -1. / sigmasq 
     return deriv2
 
 
-def deriv3_logdcensored(x, mu, sigmasq, eta_0, eta_1):
-    deriv3 = ((2. * eta_1 ** 3 * np.exp(2. * eta_0 + 2. * eta_1 * x)) /
-              (1. + np.exp(eta_0 + eta_1 * x)) ** 3
-              - (eta_1 ** 3 * np.exp(eta_0 + eta_1 * x)) /
-              (1. + np.exp(eta_0 + eta_1 * x)) ** 2)
+def deriv3_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
+    linpred  = eta_0 + eta_1 * x
+    if glm_link_name == "Probit":
+        deriv3 = None
+    else:
+        deriv3 = ((2. * eta_1 ** 3 * np.exp(2. * linpred)) /
+                  (1. + np.exp(linpred)) ** 3
+                  - (eta_1 ** 3 * np.exp(linpred)) /
+                  (1. + np.exp(linpred)) ** 2)
     return deriv3
 
 
 def deriv_logdensityratio(x, eta_0, eta_1, mu, sigmasq, approx_sd, y_hat,
-                          propDf):
+                          propDf, glm_link_name="Logit"):
     '''
     First derivative of the log target-proposal ratio for censored intensity
     rejection sampler.
     '''
-    deriv = deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1)
+    deriv = deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1,
+                               glm_link_name=glm_link_name)
     deriv -= deriv_logdt(x, mu=y_hat, scale=approx_sd, df=propDf)
     return deriv
 
@@ -732,7 +757,11 @@ def halley(f, fprime, f2prime, x0, f_args=tuple(), f_kwargs={},
         f2primex = f2prime(x, *f_args, **f_kwargs)
 
         # Update value of x
-        x = x - (2. * fx * fprimex) / (2. * fprimex ** 2 - fx * f2primex)
+        if f2primex is not None:
+            x = x - (2. * fx * fprimex) / (2. * fprimex ** 2 - fx * f2primex)
+        else:
+            # Fall back to Newton update
+            x = x - fx / fprimex
 
         # Update iteration counter
         t += 1
@@ -855,7 +884,7 @@ def map_estimator_nbinom(x, prior_a=1., prior_b=1., transform=False,
 
 def characterize_censored_intensity_dist(eta_0, eta_1, mu, sigmasq,
                                          tol=1e-5, maxIter=200, bisectIter=10,
-                                         bisectScale=6.):
+                                         bisectScale=6., glm_link_name="Logit"):
     '''
     Constructs Gaussian approximation to conditional posterior of censored
     intensity likelihood. Approximates marginal p(censored | params) via Laplace
@@ -872,7 +901,8 @@ def characterize_censored_intensity_dist(eta_0, eta_1, mu, sigmasq,
     dargs = {'eta_0': eta_0,
              'eta_1': eta_1,
              'mu': mu,
-             'sigmasq': sigmasq}
+             'sigmasq': sigmasq,
+             'glm_link_name': glm_link_name}
 
     # 1) Find mode of censored intensity density
 
@@ -920,7 +950,7 @@ def characterize_censored_intensity_dist(eta_0, eta_1, mu, sigmasq,
 
 def bound_density_ratio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
                         normalizing_cnst, tol=1e-10, maxIter=100,
-                        bisectScale=1.):
+                        bisectScale=1., glm_link_name="Logit"):
     '''
     Bound ratio of t proposal density to actual censored intensity density.
     This is used to construct an efficient, robust rejection sampler to exactly
@@ -940,6 +970,7 @@ def bound_density_ratio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
              'eta_1': eta_1,
              'mu': mu,
              'sigmasq': sigmasq,
+             'glm_link_name': glm_link_name,
              'approx_sd': approx_sd,
              'y_hat': y_hat,
              'propDf': propDf}
@@ -1007,7 +1038,7 @@ def bound_density_ratio(eta_0, eta_1, mu, sigmasq, y_hat, approx_sd, propDf,
 def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
                      p_int_cen, p_rnd_cen,
                      eta_0, eta_1, propDf,
-                     tol=1e-10, maxIter=100):
+                     tol=1e-10, maxIter=100, glm_link_name="Logit"):
     '''
     Draw censored intensities and random censoring indicators given nCen and
     quantities computed from Laplace approximation.
@@ -1054,7 +1085,8 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
     M = bound_density_ratio(eta_0=eta_0, eta_1=eta_1, mu=mu, sigmasq=sigmasq,
                             y_hat=y_hat, approx_sd=approx_sd,
                             normalizing_cnst=1. / p_int_cen, propDf=propDf,
-                            tol=tol, maxIter=maxIter)
+                            tol=tol, maxIter=maxIter,
+                            glm_link_name=glm_link_name)
 
     # Next, draw randomly-censored intensities
     intensities[W == 1] = np.random.normal(loc=mu[mapping[W == 1]],
@@ -1080,7 +1112,8 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
                                    y_hat=y_hat[mapping[active]],
                                    normalizing_cnst=1. /
                                    p_int_cen[mapping[active]],
-                                   propDf=propDf, log=False)
+                                   propDf=propDf, log=False,
+                                   glm_link_name=glm_link_name)
         accept_prob /= M[mapping[active]]
 
         # Accept draws with given probabilities by marking corresponding active
