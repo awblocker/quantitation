@@ -74,6 +74,8 @@ def p_censored(x, eta_0, eta_1, log=False, glm_link_name="Logit"):
     '''
     if glm_link_name == "Probit":
         lp = np.log(stats.norm.sf(eta_0 + eta_1 * x))
+    elif glm_link_name == "Cloglog":
+        lp = -np.exp(eta_0 + eta_1 * x)
     else:
         lp = -np.log(1. + np.exp(eta_0 + eta_1 * x))
     if log:
@@ -88,6 +90,8 @@ def p_obs(x, eta_0, eta_1, log=False, glm_link_name="Logit"):
     '''
     if glm_link_name == "Probit":
         lp = np.log(stats.norm.cdf(eta_0 + eta_1 * x))
+    elif glm_link_name == "Cloglog":
+        lp = np.log(1. - np.exp(-np.exp(eta_0 + eta_1 * x)))
     else:
         lp = -np.log(1. + np.exp(-eta_0 - eta_1 * x))
     if log:
@@ -234,6 +238,8 @@ def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
     if glm_link_name == "Probit":
         sf_adj = np.maximum(stats.norm.sf(linpred), np.sqrt(EPS))
         deriv = -stats.norm.pdf(linpred) / sf_adj * eta_1
+    elif glm_link_name == "Cloglog":
+        deriv = -eta_1 * np.exp(linpred)
     else:
         deriv = (-1. + 1. / (1. + np.exp(linpred))) * eta_1
     deriv += - (x - mu) / sigmasq
@@ -246,6 +252,8 @@ def deriv2_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
         sf_adj = np.maximum(stats.norm.sf(linpred), np.sqrt(EPS))
         deriv2 = eta_1**2 * stats.norm.pdf(linpred) / sf_adj * (
             linpred - stats.norm.pdf(linpred) / sf_adj)
+    elif glm_link_name == "Cloglog":
+        deriv2 = -eta_1**2 * np.exp(linpred)
     else:
         deriv2 = - (eta_1 ** 2 * np.exp(linpred)) / (1. + np.exp(linpred))**2
     deriv2 += -1. / sigmasq 
@@ -256,6 +264,8 @@ def deriv3_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
     linpred  = eta_0 + eta_1 * x
     if glm_link_name == "Probit":
         deriv3 = None
+    elif glm_link_name == "Cloglog":
+        deriv3 = -eta_1**3 * np.exp(linpred)
     else:
         deriv3 = ((2. * eta_1 ** 3 * np.exp(2. * linpred)) /
                   (1. + np.exp(linpred)) ** 3
