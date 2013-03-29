@@ -124,6 +124,8 @@ def main(argv):
         else:
             draws['concentration_estimand'] = \
                 estimands.proportion_of_concentration(draws['mu'])
+        draws['log_concentration_estimand'] = np.log10(
+            draws['concentration_estimand'])
 
         # Summarize results
         effective_sample_sizes = quantitation.effective_sample_sizes(**draws)
@@ -140,7 +142,7 @@ def main(argv):
             quantile_intervals[str(p)] = quantitation.quantile_intervals(
                 prob=p, **draws)
 
-        modes = quantitation.hpd_intervals(prob=n_draws**(-0.25), **draws)
+        modes = quantitation.hpd_intervals(prob=0.001, **draws)
         for k, v in modes.iteritems():
             modes[k] = np.mean(v, 1)
 
