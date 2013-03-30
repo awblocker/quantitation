@@ -449,7 +449,7 @@ def master(comm, data, cfg):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['NSTATES'])
 
         result = updates_parallel.rmh_master_nbinom_hyperparams(
-            comm=comm, r_prev=r[t - 1], p_prev=lmbda[t - 1],
+            comm=comm, r_prev=r[t - 1], p_prev=1. - lmbda[t - 1],
             **cfg['priors']['n_states_dist'])
         (r[t], lmbda[t]), accept = result
         lmbda[t] = 1. - lmbda[t]
