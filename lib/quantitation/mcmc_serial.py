@@ -75,6 +75,17 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
     if type(mapping_peptides) is not np.ndarray:
         mapping_peptides = np.asanyarray(mapping_peptides, dtype=np.int)
 
+    # Extract proposal DFs
+    try:
+        prop_df_y_mis = cfg['settings']['prop_df_y_mis']
+    except:
+        prop_df_y_mis = 5.0
+
+    try:
+        prop_df_eta = cfg['settings']['prop_df_eta']
+    except:
+        prop_df_eta = 10.
+
     # Extract dimensions from input
 
     # Number of iterations from cfg
@@ -243,6 +254,25 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
     glm_link = getattr(glm.links, glm_link_name)
     glm_family = glm.families.Binomial(link=glm_link)
 
+    # Setup function for prior log density on eta, if requested
+    try:
+        prior_scale = cfg["priors"]["eta"]["prior_scale"]
+        prior_center = cfg["priors"]["eta"]["prior_center"]
+    except:
+        prior_scale = None
+        prior_center = None
+
+    if prior_scale is not None:
+        # Gelman's weakly-informative prior (2008)
+        def dprior_eta(eta, prior_scale=5., prior_center=0.):
+            return -np.log(1. + ((eta[1] - prior_center) / prior_scale)**2)
+
+        prior_eta_kwargs = {'prior_scale': prior_scale,
+                            'prior_center': prior_center}
+    else:
+        dprior_eta = None
+        prior_eta_kwargs = {}
+
     # Initialize dictionary for acceptance statistics
     accept_stats = {'sigmasq_dist': 0,
                     'tausq_dist': 0,
@@ -279,7 +309,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         # (1c) Draw censored intensities
         kwargs['n_cen'] = n_cen_states_per_peptide
         kwargs['p_rnd_cen'] = p_rnd_cen[t - 1]
-        kwargs['propDf'] = cfg['settings']['propDf']
+        kwargs['propDf'] = prop_df_y_mis
         kwargs.update(cen_dist)
         intensities_cen, mapping_states_cen, W = lib.rintensities_cen(**kwargs)
 
@@ -431,10 +461,10 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True)
 
         # (10c) Execute MH step.
-        eta_draws[t], accept = glm.mh_update_glm_coef(b_prev=eta_draws[t - 1],
-                                                      y=y, X=X,
-                                                      family=glm_family,
-                                                      **fit_eta)
+        eta_draws[t], accept = glm.mh_update_glm_coef(
+            b_prev=eta_draws[t - 1], y=y, X=X, family=glm_family,
+            propDf=prop_df_eta, prior_log_density=dprior_eta,
+            prior_kwargs=prior_eta_kwargs, **fit_eta)
         accept_stats['eta'] += accept
 
         if (cfg['settings']['verbose'] > 0 and
