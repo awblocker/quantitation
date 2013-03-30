@@ -523,7 +523,8 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
 
 def rmh_master_glm_coef(comm, b_prev, MPIROOT=0, propDf=5., method='emulate',
                         cov=emulate.cov_sqexp, n_iter_refine=2,
-                        final_info_refine=1):
+                        final_info_refine=1, prior_log_density=None,
+                        prior_args=tuple(), prior_kwargs={}):
     '''
     Master component of single Metropolis-Hastings step for GLM coefficients
     using a normal approximation to their posterior distribution. Proposes
@@ -591,6 +592,10 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0, propDf=5., method='emulate',
     buf = np.array(0.)
     comm.Reduce([buf, MPI.DOUBLE], [log_target_ratio, MPI.DOUBLE],
                 op=MPI.SUM, root=MPIROOT)
+    if prior_log_density is not None:
+        log_target_ratio += (
+            prior_log_density(b_prop, *prior_args, **prior_kwargs) -
+            prior_log_density(b_prev, *prior_args, **prior_kwargs))
 
     # Compute log-ratio of proposal densities. This is very easy with the
     # demeaned and decorrelated values z.

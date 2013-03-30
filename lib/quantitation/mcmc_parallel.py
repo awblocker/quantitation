@@ -280,6 +280,12 @@ def master(comm, data, cfg):
             print >> sys.stderr, 'Defaulting to flat prior on concentrations'
             concentration_dist = False
 
+    # Extract proposal DFs
+    try:
+        prop_df_eta = cfg['settings']['prop_df_eta']
+    except:
+        prop_df_eta = 10.
+    
     # Extract number of iterations from cfg
     n_iterations = cfg['settings']['n_iterations']
 
@@ -367,6 +373,25 @@ def master(comm, data, cfg):
         beta_draws[0] = updates_parallel.rgibbs_master_beta(
             comm=comm, **cfg['priors']['beta_concentration'])
 
+    # Setup function for prior log density on eta, if requested
+    try:
+        prior_scale = cfg["priors"]["eta"]["prior_scale"]
+        prior_center = cfg["priors"]["eta"]["prior_center"]
+    except:
+        prior_scale = None
+        prior_center = None
+
+    if prior_scale is not None:
+        # Gelman's weakly-informative prior (2008)
+        def dprior_eta(eta, prior_scale=5., prior_center=0.):
+            return -np.log(1. + ((eta[1] - prior_center) / prior_scale)**2)
+
+        prior_eta_kwargs = {'prior_scale': prior_scale,
+                            'prior_center': prior_center}
+    else:
+        dprior_eta = None
+        prior_eta_kwargs = {}
+
     # Initialize dictionary for acceptance statistics
     accept_stats = {'sigmasq_dist': 0,
                     'tausq_dist': 0,
@@ -436,7 +461,9 @@ def master(comm, data, cfg):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['ETA'])
 
         eta_draws[t], accept = updates_parallel.rmh_master_glm_coef(
-            comm=comm, b_prev=eta_draws[t - 1], MPIROOT=MPIROOT)
+            comm=comm, b_prev=eta_draws[t - 1], MPIROOT=MPIROOT,
+            propDf=prop_df_eta, prior_log_density=dprior_eta,
+            prior_kwargs=prior_eta_kwargs)
         accept_stats['eta'] += accept
 
         # (6) Update random censoring probability. Distributed Gibbs step.
@@ -547,6 +574,12 @@ def worker(comm, rank, data, cfg):
             print >> sys.stderr, 'Defaulting to flat prior on concentrations'
             concentration_dist = False
 
+    # Extract proposal DFs
+    try:
+        prop_df_y_mis = cfg['settings']['prop_df_y_mis']
+    except:
+        prop_df_y_mis = 5.0
+
     # Create references to relevant data entries in local namespace
     mapping_peptides = data['mapping_peptides']
     intensities_obs = data['intensities_obs']
@@ -605,7 +638,7 @@ def worker(comm, rank, data, cfg):
 
     # Instantiate GLM family for eta step
     try:
-        glm_link_name = cfg["priors"]["glm_link"]
+        glm_link_name = cfg["priors"]["glm_link"].title()
     except:
         print >> sys.stderr, "GLM link not specified; defaulting to logit"
         glm_link_name = "Logit"
@@ -717,7 +750,8 @@ def worker(comm, rank, data, cfg):
             kwargs = {'eta_0': eta[0],
                       'eta_1': eta[1],
                       'mu': gamma_draws[t - 1],
-                      'sigmasq': var_peptide_conditional}
+                      'sigmasq': var_peptide_conditional,
+                      'glm_link_name': glm_link_name}
             cen_dist = lib.characterize_censored_intensity_dist(**kwargs)
 
             # (1b) Draw number of censored states per peptide
@@ -738,7 +772,7 @@ def worker(comm, rank, data, cfg):
             # (1c) Draw censored intensities
             kwargs['n_cen'] = n_cen_states_per_peptide
             kwargs['p_rnd_cen'] = p_rnd_cen
-            kwargs['propDf'] = cfg['settings']['propDf']
+            kwargs['propDf'] = prop_df_y_mis
             kwargs.update(cen_dist)
             intensities_cen, mapping_states_cen, W = lib.rintensities_cen(
                 **kwargs)
