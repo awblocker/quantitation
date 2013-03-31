@@ -459,13 +459,16 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
 
         # (10b) Estimate GLM parameters.
         fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True)
-
-        # (10c) Execute MH step.
-        eta_draws[t], accept = glm.mh_update_glm_coef(
-            b_prev=eta_draws[t - 1], y=y, X=X, family=glm_family,
-            propDf=prop_df_eta, prior_log_density=dprior_eta,
-            prior_kwargs=prior_eta_kwargs, **fit_eta)
-        accept_stats['eta'] += accept
+        
+        if np.isfinite(fit_eta['b_hat']):
+            # (10c) Execute MH step.
+            eta_draws[t], accept = glm.mh_update_glm_coef(
+                b_prev=eta_draws[t - 1], y=y, X=X, family=glm_family,
+                propDf=prop_df_eta, prior_log_density=dprior_eta,
+                prior_kwargs=prior_eta_kwargs, **fit_eta)
+            accept_stats['eta'] += accept
+        else:
+            eta_draws[t] = eta_draws[t-1]
 
         if (cfg['settings']['verbose'] > 0 and
                 t % cfg['settings']['verbose_interval'] == 0):
