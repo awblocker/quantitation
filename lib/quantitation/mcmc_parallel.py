@@ -903,7 +903,8 @@ def worker(comm, rank, data, cfg):
             # Run distributed Gibbs step for hyperparameters of concentration
             # distribution
             updates_parallel.rgibbs_worker_concentration_dist(
-                comm=comm, concentrations=known_concentrations, MPIROOT=MPIROOT)
+                comm=comm, concentrations=concentration_draws[t],
+                MPIROOT=MPIROOT)
         elif task == TAGS['SAVE']:
             # Construct path for worker-specific results
             path_worker = cfg['output']['pattern_results_worker'] % rank
