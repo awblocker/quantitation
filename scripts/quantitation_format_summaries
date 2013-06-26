@@ -111,6 +111,11 @@ def main(argv):
                                     for summary in
                                     ('mean', 'median', 'mode', 'stdev',
                                      'n_eff')]
+        if u'concentration' in summaries["means"]:
+            names_summaries_proteins.extend(
+                ["concentration_" + summary for summary in
+                 ('mean', 'median', 'mode', 'stdev', 'n_eff')])
+
         names_summaries_proteins.insert(0, 'protein')
         summaries_proteins = [names_proteins]
         summaries_proteins.extend([summaries[summary][var]  for var in
@@ -119,6 +124,10 @@ def main(argv):
                                     for summary in
                                     ('means', 'medians', 'modes', 'stderror',
                                      'effective_sample_sizes')])
+        if u'concentration' in summaries["means"]:
+            summaries_proteins.extend([summaries[summary]["concentration"]
+                for summary in ('means', 'medians', 'modes', 'stderror',
+                                'effective_sample_sizes')])
         summaries_proteins = np.rec.fromarrays(summaries_proteins,
                                                names=names_summaries_proteins)
 
