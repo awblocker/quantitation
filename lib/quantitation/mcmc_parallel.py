@@ -412,7 +412,7 @@ def master(comm, data, cfg):
             params_shared = np.r_[params_shared, beta_draws[t - 1],
                                   mean_concentration_draws[t - 1],
                                   prec_concentration_draws[t - 1]]
-
+        
         for worker in xrange(1, n_workers + 1):
             comm.Send([np.array(t), MPI.INT], dest=worker, tag=TAGS['SYNC'])
         comm.Bcast(params_shared, root=MPIROOT)
@@ -486,10 +486,11 @@ def master(comm, data, cfg):
                 for worker in xrange(1, n_workers + 1):
                     comm.Send([np.array(t), MPI.INT], dest=worker,
                               tag=TAGS['CONCENTRATION_DIST'])
-                    buf = updates_parallel.rgibbs_master_concentration_dist(
-                        comm=comm, **cfg['priors']['prec_concentration'])
-                    mean_concentration_draws[t] = buf[0]
-                    prec_concentration_draws[t] = buf[1]
+                
+                buf = updates_parallel.rgibbs_master_concentration_dist(
+                    comm=comm, **cfg['priors']['prec_concentration'])
+                mean_concentration_draws[t] = buf[0]
+                prec_concentration_draws[t] = buf[1]
 
         # Verbose output
         if (cfg['settings']['verbose'] > 0 and
