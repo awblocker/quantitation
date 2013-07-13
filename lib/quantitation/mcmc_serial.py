@@ -460,7 +460,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         # (10b) Estimate GLM parameters.
         fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True)
         
-        if np.isfinite(fit_eta['b_hat']):
+        if np.all(np.isfinite(fit_eta['b_hat'])):
             # (10c) Execute MH step.
             eta_draws[t], accept = glm.mh_update_glm_coef(
                 b_prev=eta_draws[t - 1], y=y, X=X, family=glm_family,
