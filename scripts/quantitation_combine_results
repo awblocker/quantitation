@@ -4,15 +4,10 @@
 import sys
 import getopt
 import time
-import cPickle
-import bz2
-import gzip
-import contextlib
 import itertools
 
 import h5py
 import yaml
-import numpy as np
 
 import quantitation
 from quantitation import mcmc_parallel
