@@ -699,8 +699,8 @@ def worker(comm, rank, data, cfg):
 
             # Peptide-level means using mean observed intensity; imputing
             # missing peptides as protein observed means
-            gamma_draws[0] = mu_draws[0][mapping_peptides]
-            gamma_draws[0][peptides_obs] = (
+            gamma_draws[0] = mu_draws[0, mapping_peptides]
+            gamma_draws[0, peptides_obs] = (
                 total_intensity_obs_per_peptide[peptides_obs] /
                 n_obs_states_per_peptide[peptides_obs]
             )
@@ -715,7 +715,7 @@ def worker(comm, rank, data, cfg):
 
             # Mapping from protein to peptide conditional variances for
             # convenience
-            var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
+            var_peptide_conditional = sigmasq_draws[0, mapping_peptides]
 
             # Number of states parameters from local MAP estimator based on
             # number of observed peptides; very crude, but not altogether
@@ -790,8 +790,8 @@ def worker(comm, rank, data, cfg):
 
             # (2) Update peptide-level mean parameters (gamma). Gibbs step.
             gamma_draws[t] = updates_serial.rgibbs_gamma(
-                mu=mu_draws[t - 1][mapping_peptides],
-                tausq=tausq_draws[t - 1][mapping_peptides],
+                mu=mu_draws[t - 1, mapping_peptides],
+                tausq=tausq_draws[t - 1, mapping_peptides],
               sigmasq=var_peptide_conditional, y_bar=mean_intensity_per_peptide,
               n_states=n_states_per_peptide)
             mean_gamma_by_protein = np.bincount(mapping_peptides,
@@ -805,7 +805,7 @@ def worker(comm, rank, data, cfg):
                     n_peptides=n_peptides_per_protein, beta=beta,
                     mean_concentration=mean_concentration,
                     prec_concentration=prec_concentration)
-                concentration_draws[t][mapping_known_concentrations] = \
+                concentration_draws[t, mapping_known_concentrations] = \
                         known_concentrations
             
                 mu_draws[t] = beta[0] + beta[1] * concentration_draws[t]
@@ -832,7 +832,7 @@ def worker(comm, rank, data, cfg):
 
             # Mapping from protein to peptide conditional variances for
             # convenience
-            var_peptide_conditional = sigmasq_draws[t][mapping_peptides]
+            var_peptide_conditional = sigmasq_draws[t, mapping_peptides]
 
             # (5) Update peptide-level variance parameters (tausq). Gibbs step.
             rss_by_peptide = (
@@ -918,9 +918,7 @@ def worker(comm, rank, data, cfg):
                      'n_cen_states_per_peptide': n_cen_states_per_peptide_draws,
                      }
             if supervised:
-                draws.update({
-                    'concentration': concentration})
-
+                draws.update({'concentration': concentration_draws})
             lib.write_to_hdf5(
                 path=path_worker, compress=cfg['output']['compress'],
                 draws=draws, mapping_peptides=data['mapping_peptides'],

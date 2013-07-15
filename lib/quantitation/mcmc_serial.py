@@ -206,7 +206,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                                           size=n_proteins)
 
     # Mapping from protein to peptide conditional variances for convenience
-    var_peptide_conditional = sigmasq_draws[0][mapping_peptides]
+    var_peptide_conditional = sigmasq_draws[0, mapping_peptides]
 
     # Protein-level means using mean observed intensity; excluding missing
     # peptides
@@ -222,11 +222,11 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         X = np.ones((known_concentrations.size, 2))
         X[:,1] = known_concentrations
         beta_draws[0] = glm.wls(X=X,
-                                y=mu_draws[0][mapping_known_concentrations],
+                                y=mu_draws[0, mapping_known_concentrations],
                                 w=1.)['b']
 
         # Adjust known concentrations in mu accordingly
-        mu_draws[0][mapping_known_concentrations] = beta_draws[0,0] + \
+        mu_draws[0, mapping_known_concentrations] = beta_draws[0,0] + \
                 beta_draws[0,1] * known_concentrations
 
         # And, initialize the concentration draws using the updates mu's
@@ -240,8 +240,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
 
     # Peptide-level means using mean observed intensity; imputing missing
     # peptides as protein observed means
-    gamma_draws[0] = mu_draws[0][mapping_peptides]
-    gamma_draws[0][peptides_obs] = (
+    gamma_draws[0] = mu_draws[0, mapping_peptides]
+    gamma_draws[0, peptides_obs] = (
         total_intensity_obs_per_peptide[peptides_obs] /
         n_obs_states_per_peptide[peptides_obs])
 
@@ -330,8 +330,8 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
 
         # (3) Update peptide-level mean parameters (gamma). Gibbs step.
         gamma_draws[t] = updates.rgibbs_gamma(
-            mu=mu_draws[t - 1][mapping_peptides],
-            tausq=tausq_draws[t - 1][mapping_peptides],
+            mu=mu_draws[t - 1, mapping_peptides],
+            tausq=tausq_draws[t - 1, mapping_peptides],
             sigmasq=var_peptide_conditional,
             y_bar=mean_intensity_per_peptide,
             n_states=n_states_per_peptide)
@@ -358,7 +358,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                     concentrations=known_concentrations,
                     gamma_bar=mean_gamma_by_protein[
                         mapping_known_concentrations],
-                    tausq=tausq_draws[t - 1][mapping_known_concentrations],
+                    tausq=tausq_draws[t - 1, mapping_known_concentrations],
                     n_peptides=n_peptides_per_protein[
                         mapping_known_concentrations],
                     **cfg['priors']['beta_concentration'])
@@ -369,7 +369,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                 n_peptides=n_peptides_per_protein, beta=beta_draws[t],
                 mean_concentration=mean_concentration_draws[t-1],
                 prec_concentration=prec_concentration_draws[t-1])
-            concentration_draws[t][mapping_known_concentrations] = \
+            concentration_draws[t, mapping_known_concentrations] = \
                     known_concentrations
 
             if concentration_dist:
@@ -410,7 +410,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
             prior_shape=shape_sigmasq[ t - 1], prior_rate=rate_sigmasq[t - 1])
 
         # Mapping from protein to peptide conditional variances for convenience
-        var_peptide_conditional = sigmasq_draws[t][mapping_peptides]
+        var_peptide_conditional = sigmasq_draws[t, mapping_peptides]
 
         # (6) Update peptide-level variance parameters (tausq). Gibbs step.
         rss_by_peptide = (gamma_draws[t] - mu_draws[t, mapping_peptides]) ** 2
