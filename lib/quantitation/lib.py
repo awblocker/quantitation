@@ -12,7 +12,6 @@ import h5py
 import numpy as np
 from scipy import special
 from scipy import optimize
-from scipy import linalg
 from scipy import stats
 
 #==============================================================================
@@ -1163,6 +1162,13 @@ def balanced_sample(n_items, n_samples):
 #==============================================================================
 
 
+def acf(x):
+    '''
+    Compute lag-1 autocorrelation from vector of observations
+    '''
+    z = (x - np.mean(x, axis=0)) / np.std(x, axis=0, ddof=1)
+    return np.mean(z[1:] * z[:-1], axis=0)
+
 def effective_sample_sizes(**kwargs):
     '''
     Estimate effective sample size for each input using AR(1) approximation.
@@ -1196,14 +1202,11 @@ def effective_sample_sizes(**kwargs):
         if len(np.shape(draws)) < 2:
             draws = draws[:, np.newaxis]
 
-        # Demean the draws
-        draws = draws - draws.mean(axis=0)
-
         # Compute lag-1 autocorrelation by column
-        acf = np.mean(draws[1:] * draws[:-1], axis=0) / np.var(draws, axis=0)
+        rho = np.array([acf(x) for x in draws.T])
 
         # Compute ess from ACF
-        ess[var] = np.shape(draws)[0] * (1. - acf) / (1. + acf)
+        ess[var] = np.shape(draws)[0] * (1. - rho) / (1. + rho)
 
     if len(kwargs) > 1:
         return ess
