@@ -1,4 +1,21 @@
-from distutils.core import setup
+from distutils.core import setup, Extension
+
+import numpy
+
+# Setup extensions
+try:
+    numpy_include = numpy.get_include()
+except AttributeError:
+    numpy_include = numpy.get_numpy_include()
+
+fast_agg_module = Extension('_fast_agg',
+                            sources=['src/fast_agg_wrap.cxx',
+                                     'src/fast_agg.cc'],
+                            include_dirs=[numpy_include]
+                           )
+
+EXT_MODULES = [fast_agg_module]
+PY_MODULES = ["fast_agg"]
 
 # Keeping all Python code for package in lib directory
 NAME = 'quantitation'
@@ -26,6 +43,8 @@ setup(name=NAME,
       packages=PACKAGES,
       package_dir=PACKAGE_DIR,
       scripts=SCRIPTS,
-      requires=REQUIRES
+      requires=REQUIRES,
+      ext_modules=EXT_MODULES,
+      py_modules=PY_MODULES
       )
 
