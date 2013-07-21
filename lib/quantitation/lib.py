@@ -14,6 +14,8 @@ from scipy import special
 from scipy import optimize
 from scipy import stats
 
+import fast_agg
+
 #==============================================================================
 # Useful constants
 #==============================================================================
@@ -1161,14 +1163,6 @@ def balanced_sample(n_items, n_samples):
 # General-purpose MCMC diagnostic and summarization functions
 #==============================================================================
 
-
-def acf(x):
-    '''
-    Compute lag-1 autocorrelation from vector of observations
-    '''
-    z = (x - np.mean(x, axis=0)) / np.std(x, axis=0, ddof=1)
-    return np.mean(z[1:] * z[:-1], axis=0)
-
 def effective_sample_sizes(**kwargs):
     '''
     Estimate effective sample size for each input using AR(1) approximation.
@@ -1202,11 +1196,7 @@ def effective_sample_sizes(**kwargs):
         if len(np.shape(draws)) < 2:
             draws = draws[:, np.newaxis]
 
-        # Compute lag-1 autocorrelation by column
-        rho = np.array([acf(x) for x in draws.T])
-
-        # Compute ess from ACF
-        ess[var] = np.shape(draws)[0] * (1. - rho) / (1. + rho)
+        ess[var] = fast_agg.effective_sample_sizes(draws);
 
     if len(kwargs) > 1:
         return ess
@@ -1248,7 +1238,7 @@ def posterior_medians(**kwargs):
             draws = draws[:, np.newaxis]
 
         # Estimate posterior means
-        medians[var] = np.median(draws, 0)
+        medians[var] = fast_agg.col_medians(draws)
 
     if len(kwargs) > 1:
         return medians
@@ -1381,6 +1371,47 @@ def posterior_stderrors(**kwargs):
     else:
         return stderrors[kwargs.keys()[0]]
 
+def posterior_means_stderrors(**kwargs):
+    '''
+    Estimate posterior means from inputs.
+    Each input should be a 1- or 2-dimensional ndarray. 2-dimensional inputs
+    should have one variable per column, one iteration per row.
+
+    Parameters
+    ----------
+        - **kwargs
+            Names and arrays of MCMC draws.
+
+    Returns
+    -------
+        - If only one array of draws is provided, a single array containing the
+          posterior mean estimate(s) for those variables.
+        - If multiple arrays are provided, a dictionary with keys identical to
+          those provided as parameters and one array per input containing
+          posterior mean estimate(s).
+
+    '''
+    # Ensure that at least one input was provided
+    if len(kwargs) < 1:
+        return ValueError('Must provide at least one array of draws.')
+
+    # Allocate empty dictionaries for results
+    means = {}
+    stderrors = {}
+
+    # Iterate over arrays of draws
+    for var, draws in kwargs.iteritems():
+        # Add dimension to 1d arrays
+        if len(np.shape(draws)) < 2:
+            draws = draws[:, np.newaxis]
+
+        # Estimate posterior means
+        means[var], stderrors[var] = fast_agg.col_mean_std(draws)
+
+    if len(kwargs) > 1:
+        return means, stderrors
+    else:
+        return means[kwargs.keys()[0]], stderrors[kwargs.keys()[0]]
 
 def hpd_intervals(prob=0.95, **kwargs):
     '''
@@ -1469,8 +1500,7 @@ def quantile_intervals(prob=0.95, **kwargs):
         if len(np.shape(draws)) < 2:
             draws = draws[:, np.newaxis]
 
-        # Estimate HPD intervals, based on HPDinterval function in coda R
-        # package
+        # Estimate quantile intervals
         sorted_draws = np.sort(draws, 0)
         n_draws = draws.shape[0]
         lower = int(round(n_draws * lower_prob))

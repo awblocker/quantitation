@@ -4,10 +4,6 @@
 import sys
 import getopt
 import time
-import cPickle
-import bz2
-import gzip
-import contextlib
 
 import h5py
 import numpy as np
@@ -115,8 +111,6 @@ def main(argv):
         else:
             draws = draws_input
 
-        n_draws = cfg['settings']['n_iterations'] - cfg['settings']['burn_in']
-
         # Compute proportion of concentration estimand
         if u'concentration' in draws:
             draws['concentration_estimand'] = \
@@ -129,9 +123,7 @@ def main(argv):
 
         # Summarize results
         effective_sample_sizes = quantitation.effective_sample_sizes(**draws)
-        means = quantitation.posterior_means(**draws)
-        variances = quantitation.posterior_variances(**draws)
-        stderrors = quantitation.posterior_stderrors(**draws)
+        means, stderrors = quantitation.posterior_means_stderrors(**draws)
         medians = quantitation.posterior_medians(**draws)
 
         hpd_intervals = {}
@@ -151,8 +143,7 @@ def main(argv):
         quantitation.write_to_hdf5(
             fname=path_summaries, compress=compress,
             effective_sample_sizes=effective_sample_sizes, means=means,
-            variances=variances, stderror=stderrors,
-            medians=medians, hpd_intervals=hpd_intervals,
+            stderror=stderrors, medians=medians, hpd_intervals=hpd_intervals,
             quantile_intervals=quantile_intervals, modes=modes,
             accept_stats=results['accept_stats'],
             mapping_peptides=results['mapping_peptides'])
