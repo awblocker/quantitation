@@ -12,7 +12,7 @@ void ColMeanStdevs(double* data, int n, int p,
         means[j] = 0.;
         stdevs[j] = 0.; // Holds sum of squares for now
         for (int i=0; i < n; i++) {
-            intmax_t address = p*i + j;
+            intmax_t address = ((intmax_t) p) * i + (intmax_t) j;
             double delta = data[address] - means[j]; // Assuming row-major order
             means[j] += delta / (i + 1);
             stdevs[j] += delta * (data[address] - means[j]);
@@ -26,7 +26,7 @@ double EffectiveSampleSize(double* x, int n, int offset, int stride) {
     // Compute mean and variance simultanously
     double mean=0., var=0., rho=0.;
     for (intmax_t i=0; i < n; i++) {
-        intmax_t address = offset + i*stride;
+        intmax_t address = (intmax_t) offset + i * ((intmax_t) stride);
         double delta = x[address] - mean;
         mean += delta / (i + 1);
         var += delta * (x[address] - mean);
@@ -36,7 +36,7 @@ double EffectiveSampleSize(double* x, int n, int offset, int stride) {
 
     // Compute first-order autocorrelation using these values
     for (intmax_t i=1; i < n; i++) {
-        intmax_t address = offset + i*stride;
+        intmax_t address = (intmax_t) offset + i * ((intmax_t) stride);
         rho += (x[address] - mean) / var * (x[address - stride] - mean) / (n-1);
     }
 
@@ -61,7 +61,7 @@ void ColMedians(double* data, int n, int p,
     for (int j=0; j < p; j++) {
         // Copy column to std::vector for partial sort
         for (intmax_t i=0; i < n; i++) {
-            intmax_t address = p*i + j;
+            intmax_t address = ((intmax_t) p) * i + (intmax_t) j;
             col[i] = data[address]; // Assuming row-major order
         }
 
