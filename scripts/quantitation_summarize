@@ -102,12 +102,16 @@ def main(argv):
 
         draws_input = results['draws']
         
+        thin = 1
+        if (cfg['settings']['thin'] is not None):
+            thin = cfg['settings']['thin']
+
         if (cfg['settings']['burn_in'] is not None and
             cfg['settings']['burn_in']>0):
             # Eliminate burn-in, if requested
             draws = {}
             for k in draws_input.keys():
-                draws[k] = draws_input[k][cfg['settings']['burn_in']:]
+                draws[k] = draws_input[k][cfg['settings']['burn_in']::thin]
         else:
             draws = draws_input
 
