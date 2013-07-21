@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdint.h>
 #include <vector>
 #include <algorithm>
 #include "fast_agg.h"
@@ -11,9 +12,10 @@ void ColMeanStdevs(double* data, int n, int p,
         means[j] = 0.;
         stdevs[j] = 0.; // Holds sum of squares for now
         for (int i=0; i < n; i++) {
-            double delta = data[p*i + j] - means[j]; // Assuming row-major order
+            intmax_t address = p*i + j;
+            double delta = data[address] - means[j]; // Assuming row-major order
             means[j] += delta / (i + 1);
-            stdevs[j] += delta * (data[p*i + j] - means[j]);
+            stdevs[j] += delta * (data[address] - means[j]);
         }
         // Correct denominator and sqrt to get std deviation
         stdevs[j] = sqrt(stdevs[j] / (n - 1));
@@ -23,18 +25,19 @@ void ColMeanStdevs(double* data, int n, int p,
 double EffectiveSampleSize(double* x, int n, int offset, int stride) {
     // Compute mean and variance simultanously
     double mean=0., var=0., rho=0.;
-    for (int i=0; i < n; i++) {
-        double delta = x[offset + i*stride] - mean;
+    for (intmax_t i=0; i < n; i++) {
+        intmax_t address = offset + i*stride;
+        double delta = x[address] - mean;
         mean += delta / (i + 1);
-        var += delta * (x[offset + i*stride] - mean);
+        var += delta * (x[address] - mean);
     }
     // Correct denominator and sqrt to get std deviation
     var /= (n - 1);
 
     // Compute first-order autocorrelation using these values
-    for (int i=1; i < n; i++) {
-        rho += (x[offset + i*stride] - mean) / var *
-            (x[offset + (i-1)*stride] - mean) / (n-1);
+    for (intmax_t i=1; i < n; i++) {
+        intmax_t address = offset + i*stride;
+        rho += (x[address] - mean) / var * (x[address - stride] - mean) / (n-1);
     }
 
     return n * (1 - rho) / (1 + rho);
@@ -57,8 +60,9 @@ void ColMedians(double* data, int n, int p,
     std::vector<double> col (n, 0.);
     for (int j=0; j < p; j++) {
         // Copy column to std::vector for partial sort
-        for (int i=0; i < n; i++) {
-            col[i] = data[p*i + j]; // Assuming row-major order
+        for (intmax_t i=0; i < n; i++) {
+            intmax_t address = p*i + j;
+            col[i] = data[address]; // Assuming row-major order
         }
 
         // Partially sort to obtain median
