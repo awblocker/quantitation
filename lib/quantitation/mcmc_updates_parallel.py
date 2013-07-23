@@ -1,5 +1,6 @@
 from mpi4py import MPI
 from scipy import optimize
+from scipy import linalg
 
 import glm
 

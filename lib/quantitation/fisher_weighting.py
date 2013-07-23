@@ -1,4 +1,5 @@
 from mpi4py import MPI
+from scipy import linalg
 
 from lib import *
 

@@ -1,3 +1,4 @@
+from scipy import linalg
 
 from lib import *
 import glm
