@@ -161,7 +161,7 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
                                   prior_prec_log=1. / 0.652 ** 2,
                                   prior_a=1., prior_b=1.,
                                   brent_scale=6., fallback_upper=10000.,
-                                  correct_prior=True, method='emulate',
+                                  correct_prior=True, method='newton',
                                   coverage_prob=0.999,
                                   grid_min_spacing=0.5, cov=emulate.cov_sqexp):
     '''
@@ -528,7 +528,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
     # Synchronization of the resulting draw is handled separately.
 
 
-def rmh_master_glm_coef(comm, b_prev, MPIROOT=0, propDf=5., method='emulate',
+def rmh_master_glm_coef(comm, b_prev, MPIROOT=0, propDf=5., method='newton',
                         cov=emulate.cov_sqexp, n_iter_refine=2,
                         final_info_refine=1, prior_log_density=None,
                         prior_args=tuple(), prior_kwargs={}):
@@ -550,7 +550,7 @@ def rmh_master_glm_coef(comm, b_prev, MPIROOT=0, propDf=5., method='emulate',
     # Compute dimensions
     p = np.size(b_prev)
 
-    if method=='emulate':
+    if method == 'emulate':
         # Gather emulators from workers
         emulator = emulate.aggregate_emulators_mpi(
             comm=comm, emulator=None, MPIROOT=MPIROOT,
