@@ -344,11 +344,11 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
         # This assumes that rmh_worker_nbinom_glm_coef() has been called on all
         # workers.
         theta_hat, prec = posterior_approx_distributed(
-            comm=comm, dim_param=p, MPIROOT=MPIROOT)
+            comm=comm, dim_param=2, MPIROOT=MPIROOT)
 
         # Refine approximation with single Newton-Raphson step
         theta_hat, prec = refine_distributed_approx(
-            comm=comm, est=theta_hat, prec=prec, dim_param=p,
+            comm=comm, est=theta_hat, prec=prec, dim_param=2,
             n_iter=n_iter_refine, final_info=final_info_refine, MPIROOT=MPIROOT)
 
         # Cholesky decompose precision matrix for draws and density calculations
