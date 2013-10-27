@@ -301,8 +301,8 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
                                   prior_mean_log=2.65,
                                   prior_prec_log=1. / 0.652 ** 2,
                                   prior_a=1., prior_b=1., propDf=5.,
-                                  method='emulate', cov=emulate.cov_sqexp,
-                                  n_iter_refine=2, final_info_refine=1):
+                                  method='newton', cov=emulate.cov_sqexp,
+                                  n_iter_refine=10, final_info_refine=1):
     '''
     Master side of Metropolis-Hastings step for negative-binomial
     hyperparameters given all other parameters.
@@ -338,7 +338,7 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
         # Compute Cholesky decomposition of approximate combined information
         # for proposal
         U = linalg.cholesky(emulator['info'], lower=False)
-    else:
+    elif method == 'newton':
         # Build normal approximation to posterior of transformed hyperparameters.
         # Aggregating local results from workers.
         # This assumes that rmh_worker_nbinom_glm_coef() has been called on all
@@ -353,6 +353,9 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
 
         # Cholesky decompose precision matrix for draws and density calculations
         U = linalg.cholesky(prec, lower=False)
+    else:
+        print >> sys.stderr, "Error - method %s unknown" % method
+        return
 
     # Propose r and p jointly
     z_prop = (np.random.randn(2) /
@@ -407,7 +410,7 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
 
 
 def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
-                        method='emulate', MPIROOT=0, coverage_prob=0.999,
+                        method='newton', MPIROOT=0, coverage_prob=0.999,
                         grid_min_spacing=0.5, cov=emulate.cov_sqexp, **kwargs):
     '''
     Worker component of single Metropolis-Hastings step for GLM coefficients
@@ -444,7 +447,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
         # Send emulator to master node
         emulate.aggregate_emulators_mpi(
             comm=comm, emulator=emulator, MPIROOT=MPIROOT)
-    else:
+    elif method == 'newton':
         # Build necessary quantities for distributed posterior approximation
         z_hat = np.dot(I, b_hat)
 
@@ -498,6 +501,9 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
             # Combine informations on master
             comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
                         op=MPI.SUM, root=MPIROOT)
+    else:
+        print >> sys.stderr, "Error - method %s unknown" % method
+        return
 
     # Obtain proposed value of coefficients from master.
     b_prop = np.empty(p)

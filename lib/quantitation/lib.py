@@ -235,7 +235,7 @@ def deriv_logdt(x, mu=0, scale=1, df=1.):
 
 
 def deriv_logdcensored(x, mu, sigmasq, eta_0, eta_1, glm_link_name="Logit"):
-    linpred  = eta_0 + eta_1 * x
+    linpred = eta_0 + eta_1 * x
     if glm_link_name == "Probit":
         sf_adj = np.maximum(stats.norm.sf(linpred), EPS)
         pdf = stats.norm.pdf(linpred)
@@ -1056,7 +1056,7 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
                      eta_0, eta_1, propDf,
                      tol=1e-10, maxIter=100, glm_link_name="Logit"):
     '''
-    Draw censored intensities and random censoring indicators given nCen and
+    Draw censored intensities and random censoring indicators given n_cen and
     quantities computed from Laplace approximation.
 
     Returns
@@ -1112,6 +1112,11 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
 
     # Draw remaining intensity-censored intensities using rejection sampler
     active = (W == 0)
+    if type(eta_0) != np.ndarray or len(eta_0) < 1:
+        eta_0 = eta_0 * np.ones_like(y_hat)
+    if type(eta_1) != np.ndarray or len(eta_1) < 1:
+        eta_1 = eta_1 * np.ones_like(y_hat)
+    
     while(np.sum(active) > 0):
         # Propose from t distribution
         intensities[active] = np.random.standard_t(df=propDf,
@@ -1121,7 +1126,8 @@ def rintensities_cen(n_cen, mu, sigmasq, y_hat, approx_sd,
 
         # Compute acceptance probability
         accept_prob = densityratio(intensities[active],
-                                   eta_0=eta_0, eta_1=eta_1,
+                                   eta_0=eta_0[mapping[active]],
+                                   eta_1=eta_1[mapping[active]],
                                    mu=mu[mapping[active]],
                                    sigmasq=sigmasq[mapping[active]],
                                    approx_sd=approx_sd[mapping[active]],

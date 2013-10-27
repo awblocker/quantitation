@@ -9,7 +9,7 @@ import mcmc_updates_serial as updates
 
 def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
                 known_concentrations=None, mapping_known_concentrations=None,
-                **kwargs):
+                peptide_features=None, **kwargs):
     '''
     Serial MCMC sampler for posterior of state-level censoring model.
 
@@ -66,6 +66,12 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         except:
             print >> sys.stderr, 'Defaulting to flat prior on concentrations'
             concentration_dist = False
+    
+    # Determine whether peptide features are present and, if so, their size
+    if peptide_features is None:
+        n_peptide_features = 0
+    else:
+        n_peptide_features = peptide_features.shape[1]
 
     # Convert inputs to np.ndarrays as needed
     if type(intensities_obs) is not np.ndarray:
@@ -158,7 +164,7 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
     rate_tausq = np.empty(n_iterations)
 
     # Censoring probability model parameters
-    eta_draws = np.empty((n_iterations, 2))
+    eta_draws = np.zeros((n_iterations, 2 + n_peptide_features * 2))
     p_rnd_cen = np.empty(n_iterations)
 
     # Number of states model parameters
@@ -286,8 +292,18 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
 
         # (1a) Obtain p_int_cen per peptide and approximatations of censored
         #   intensity posteriors.
-        kwargs = {'eta_0': eta_draws[t - 1, 0],
-                  'eta_1': eta_draws[t - 1, 1],
+        eta_0_effective = eta_draws[t - 1, 0]
+        eta_1_effective = eta_draws[t - 1, 1]
+        if n_peptide_features > 0:
+            eta_0_effective += np.dot(
+                peptide_features, eta_draws[t - 1, 2:(2 + n_peptide_features)]
+            )
+            eta_1_effective += np.dot(
+                peptide_features, eta_draws[t - 1, (2 + n_peptide_features):]
+            )
+            
+        kwargs = {'eta_0': eta_0_effective,
+                  'eta_1': eta_1_effective,
                   'mu': gamma_draws[t - 1],
                   'sigmasq': var_peptide_conditional,
                   'glm_link_name': glm_link_name}
@@ -450,15 +466,34 @@ def mcmc_serial(intensities_obs, mapping_states_obs, mapping_peptides, cfg,
         # (10a) Build design matrix and response. Only using observed and
         # intensity-censored states.
         n_at_risk = n_obs_states + np.sum(W < 1)
-        X = np.empty((n_at_risk, 2))
-        X[:, 0] = 1.
-        X[:, 1] = np.r_[intensities_obs, intensities_cen[W < 1]]
-        #
-        y = np.zeros(n_at_risk)
+        X = np.zeros((n_at_risk + n_peptide_features * 2,
+                     2 + n_peptide_features * 2))
+        X[:n_at_risk, 0] = 1.
+        X[:n_at_risk, 1] = np.r_[intensities_obs, intensities_cen[W < 1]]
+        if n_peptide_features > 0:
+            peptide_features_by_state = peptide_features[
+                np.r_[mapping_states_obs, mapping_states_cen[W < 1]]
+            ]
+            X[:n_at_risk, 2:(2 + n_peptide_features)] = \
+                peptide_features_by_state
+            X[:n_at_risk, (2 + n_peptide_features):] = \
+                (peptide_features_by_state.T * X[:n_at_risk, 1]).T
+            X[n_at_risk:, 2:] = np.eye(n_peptide_features * 2)
+        
+        y = np.zeros(n_at_risk + n_peptide_features * 2)
         y[:n_obs_states] = 1.
+        if n_peptide_features > 0:
+            y[n_at_risk:] = 0.5
+        
+        w = np.ones_like(y)
+        if n_peptide_features > 0:
+            w[n_at_risk:(n_at_risk + n_peptide_features)] = \
+                cfg['priors']['eta_features']['primary_pseudoobs']
+            w[(n_at_risk + n_peptide_features):] = \
+                cfg['priors']['eta_features']['interaction_pseudoobs']
 
         # (10b) Estimate GLM parameters.
-        fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True)
+        fit_eta = glm.glm(y=y, X=X, w=w, family=glm_family, info=True)
         
         if np.all(np.isfinite(fit_eta['b_hat'])):
             # (10c) Execute MH step.

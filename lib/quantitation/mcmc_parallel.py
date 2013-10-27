@@ -90,6 +90,9 @@ def load_data(cfg, rank=None, n_workers=None):
         print >> sys.stderr, 'Defaulting to unsupervised algorithm'
         supervised = False
 
+    # Determine whether features are provided
+    have_peptide_features = cfg['data'].has_key('path_peptide_features')
+
     # Load peptide to protein mapping
     mapping_peptides = np.loadtxt(cfg['data']['path_mapping_peptides'],
                                   dtype=np.int)
@@ -101,22 +104,28 @@ def load_data(cfg, rank=None, n_workers=None):
             np.max(mapping_peptides) > n_peptides - 1):
         raise ValueError('Peptide to protein mapping (mapping_peptides)'
                          ' is not valid')
+                         
+    # Load peptide-level features, if supplied
+    if have_peptide_features:
+        data_peptide_features = np.loadtxt(
+            cfg['data']['path_peptide_features']
+            )
 
     if rank == 0:
         # Return just the peptide to protein mapping if this is the root
         data = {'intensities_obs': None,
                 'mapping_states_obs': None,
                 'mapping_peptides': mapping_peptides}
+        if have_peptide_features:
+            data.update({'dim_peptide_features': data_peptide_features.shape})
         return data
 
     # For everyone else, load the state-level data
     path_data_state = cfg['data']['path_data_state']
-    mapping_states_obs, intensities_obs = np.loadtxt(path_data_state,
-                                                     dtype=[(
-                                                         'peptide', np.int),
-                                                     ('intensity',
-                                                      np.float)],
-                                                     unpack=True)
+    mapping_states_obs, intensities_obs = np.loadtxt(
+        path_data_state,
+        dtype=[('peptide', np.int), ('intensity', np.float)],
+        unpack=True)
 
     # Check for validity of state to peptide mapping
     if (not issubclass(mapping_states_obs.dtype.type, np.integer) or
@@ -182,6 +191,11 @@ def load_data(cfg, rank=None, n_workers=None):
     # Subset intensities
     intensities_obs_worker = intensities_obs[workers_by_state == (rank - 1)]
 
+    # Subset features, if available
+    if have_peptide_features:
+        peptide_features_worker = data_peptide_features[workers_by_peptide ==
+                                                        (rank - 1)]
+
     # Subset and reindex peptide to protein mapping
     select_peptides = np.where(workers_by_peptide == (rank - 1))[0]
     unique_proteins, mapping_peptides_worker = np.unique(
@@ -227,6 +241,10 @@ def load_data(cfg, rank=None, n_workers=None):
             'known_concentrations': known_concentrations_worker,
             'mapping_known_concentrations': mapping_known_concentrations_worker}
         )
+    if have_peptide_features:
+        data.update({
+            'peptide_features_worker': peptide_features_worker
+        })
     return data
 
 
@@ -271,6 +289,12 @@ def master(comm, data, cfg):
         print >> sys.stderr, 'Defaulting to unsupervised algorithm'
         supervised = False
     
+    have_peptide_features = cfg['priors'].has_key('path_peptide_features')
+    if have_peptide_features:
+        n_peptide_features = data['dim_peptide_features'][1]
+    else:
+        n_peptide_features = 0
+    
     # If supervised, determine whether to model distribution of concentrations
     # If this is False, prior on $\beta_1$ is scaled by $|\beta_1|^{n_{mis}}$.
     if supervised:
@@ -300,7 +324,7 @@ def master(comm, data, cfg):
     rate_tausq = np.empty(n_iterations)
 
     # Censoring probability model parameters
-    eta_draws = np.empty((n_iterations, 2))
+    eta_draws = np.zeros((n_iterations, 2 + n_peptide_features * 2))
     p_rnd_cen = np.empty(n_iterations)
 
     # Number of states model parameters
@@ -574,6 +598,13 @@ def worker(comm, rank, data, cfg):
         except:
             print >> sys.stderr, 'Defaulting to flat prior on concentrations'
             concentration_dist = False
+    
+    # Get information on peptide features if they're available
+    have_peptide_features = cfg['priors'].has_key('path_peptide_features')
+    if have_peptide_features:
+        n_peptide_features = data['peptide_features_worker'].shape[1]
+    else:
+        n_peptide_features = 0
 
     # Extract proposal DFs
     try:
@@ -748,8 +779,16 @@ def worker(comm, rank, data, cfg):
 
             # (1a) Obtain p_int_cen per peptide and approximatations of censored
             #   intensity posteriors.
-            kwargs = {'eta_0': eta[0],
-                      'eta_1': eta[1],
+            eta_0_effective = eta[0]
+            eta_1_effective = eta[1]
+            if n_peptide_features > 0:
+                eta_0_effective += np.dot(data['peptide_features_worker'],
+                                          eta[2:(2 + n_peptide_features)])
+                eta_1_effective += np.dot(data['peptide_features_worker'],
+                                          eta[(2 + n_peptide_features):])
+                
+            kwargs = {'eta_0': eta_0_effective,
+                      'eta_1': eta_1_effective,
                       'mu': gamma_draws[t - 1],
                       'sigmasq': var_peptide_conditional,
                       'glm_link_name': glm_link_name}
@@ -863,20 +902,41 @@ def worker(comm, rank, data, cfg):
             # Build design matrix and response. Only using observed and
             # intensity-censored states.
             n_at_risk = n_obs_states + np.sum(W < 1)
-            X = np.empty((n_at_risk, 2))
-            X[:, 0] = 1.
-            X[:, 1] = np.r_[intensities_obs, intensities_cen[W < 1]]
-            #
-            y = np.zeros(n_at_risk)
+            X = np.zeros((n_at_risk + n_peptide_features * 2,
+                         2 + n_peptide_features * 2))
+            X[:n_at_risk, 0] = 1.
+            X[:n_at_risk, 1] = np.r_[intensities_obs, intensities_cen[W < 1]]
+            if n_peptide_features > 0:
+                peptide_features_by_state = data['peptide_features_worker'][
+                    np.r_[mapping_states_obs, mapping_states_cen[W < 1]]
+                ]
+                X[:n_at_risk, 2:(2 + n_peptide_features)] = \
+                    peptide_features_by_state
+                X[:n_at_risk, (2 + n_peptide_features):] = \
+                    (peptide_features_by_state.T * X[:n_at_risk, 1]).T
+                X[n_at_risk:, 2:] = np.eye(n_peptide_features * 2)
+            
+            y = np.zeros(n_at_risk + n_peptide_features * 2)
             y[:n_obs_states] = 1.
+            if n_peptide_features > 0:
+                y[n_at_risk:] = 0.5
+            
+            w = np.ones_like(y)
+            if n_peptide_features > 0:
+                w[n_at_risk:(n_at_risk + n_peptide_features)] = (
+                    cfg['priors']['eta_features']['primary_pseudoobs'] /
+                    (comm.Get_size() - 1.))
+                w[(n_at_risk + n_peptide_features):] = (
+                    cfg['priors']['eta_features']['interaction_pseudoobs'] /
+                    (comm.Get_size() - 1.))
 
             # Estimate GLM parameters.
-            fit_eta = glm.glm(y=y, X=X, family=glm_family, info=True,
+            fit_eta = glm.glm(y=y, X=X, w=w, family=glm_family, info=True,
                               cov=True)
 
             # Handle distributed computation draw
             updates_parallel.rmh_worker_glm_coef(
-              comm=comm, b_prev=eta, family=glm_family, y=y, X=X,
+              comm=comm, b_prev=eta, family=glm_family, y=y, X=X, w=w,
               MPIROOT=MPIROOT, **fit_eta)
         elif task == TAGS['PRNDCEN']:
             # Run distributed Gibbs step for p_rnd_cen

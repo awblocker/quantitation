@@ -94,15 +94,25 @@ def main(argv):
         else:
             data_concentrations = (None, None)
         
+        if cfg['data'].has_key('path_peptide_features'):
+            peptide_features = np.loadtxt(
+                cfg['data']['path_peptide_features']
+                )
+        else:
+            peptide_features = None
+        
         mapping_known_concentrations, known_concentrations = data_concentrations
 
 
         # Run MCMC sampler
         if timing:
             time_start = time.time()
+
         draws, accept_stats = quantitation.mcmc_serial(
             intensities_obs, mapping_states_obs, mapping_peptides,
-            cfg, known_concentrations, mapping_known_concentrations)
+            cfg, known_concentrations, mapping_known_concentrations,
+            peptide_features)
+
         if timing:
             time_done = time.time()
             print >> sys.stderr, TIMING_MSG % (cfg_path,
