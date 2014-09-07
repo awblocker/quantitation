@@ -230,7 +230,7 @@ def rmh_worker_nbinom_hyperparams(comm, x, r_prev, p_prev, MPIROOT=0,
         z_hat = np.dot(info, theta_hat)
 
         # Condense approximation to a single vector for reduction
-        approx = np.r_[z_hat, I[np.tril_indices(2)]]
+        approx = np.r_[z_hat, info[np.tril_indices(2)]]
 
         # Combine with other approximations on master.
         comm.Reduce([approx, MPI.DOUBLE], None,
