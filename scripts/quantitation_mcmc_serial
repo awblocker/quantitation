@@ -5,7 +5,6 @@ import sys
 import getopt
 import time
 
-import h5py
 import yaml
 import numpy as np
 
@@ -38,20 +37,20 @@ MCMC sampler used %f seconds for %d iterations.
 def main(argv):
     '''
     Main function for option-parsing and startup.
-    
+
     Takes sys.argv[1:] as input.
     '''
     # Set default values for options
     timing = False
-    
+
     # Parse arguments and options
     opts, args = getopt.getopt(argv, "h",
                                ["help", "time"])
-    for option, value in opts:
+    for option, _ in opts:
         if option in ('-h', "--help"):
             print >> sys.stderr, HELP
             sys.exit(2)
-        elif option=='--time':
+        elif option == '--time':
             timing = True
         else:
             print >> sys.stderr, "Error -- unknown option %s" % option
@@ -62,7 +61,7 @@ def main(argv):
     else:
         print >> sys.stderr, "Error -- need path to YAML configuration"
         sys.exit(1)
-    
+
     # Iterate over configuration files
     for cfg_path in cfg_paths:
         # Parse YAML configuration
@@ -73,10 +72,10 @@ def main(argv):
         # Use supervised algorithm?
         try:
             supervised = cfg['priors']['supervised']
-        except:
+        except KeyError:
             print >> sys.stderr, 'Defaulting to unsupervised algorithm'
             supervised = False
-        
+
         # Load data
         mapping_peptides = np.loadtxt(cfg['data']['path_mapping_peptides'],
                                       dtype=np.int)
@@ -93,14 +92,13 @@ def main(argv):
                 unpack=True)
         else:
             data_concentrations = (None, None)
-        
+
         if cfg['data'].has_key('path_peptide_features'):
             peptide_features = np.loadtxt(
-                cfg['data']['path_peptide_features']
-                )
+                cfg['data']['path_peptide_features'], ndmin=2)
         else:
             peptide_features = None
-        
+
         mapping_known_concentrations, known_concentrations = data_concentrations
 
 
