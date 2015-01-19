@@ -288,8 +288,7 @@ def master(comm, data, cfg):
         print >> sys.stderr, 'Defaulting to unsupervised algorithm'
         supervised = False
 
-    have_peptide_features = cfg['priors'].has_key('path_peptide_features')
-    if have_peptide_features:
+    if 'dim_peptide_features' in data:
         n_peptide_features = data['dim_peptide_features'][1]
     else:
         n_peptide_features = 0
@@ -602,8 +601,7 @@ def worker(comm, rank, data, cfg):
             concentration_dist = False
 
     # Get information on peptide features if they're available
-    have_peptide_features = cfg['priors'].has_key('path_peptide_features')
-    if have_peptide_features:
+    if 'peptide_features_worker' in data:
         n_peptide_features = data['peptide_features_worker'].shape[1]
     else:
         n_peptide_features = 0
@@ -684,13 +682,14 @@ def worker(comm, rank, data, cfg):
     #   - 0:2 : shape_sigmasq, rate_sigmasq
     #   - 2:4 : shape_tausq, rate_tausq
     #   - 4:6 : r, lmbda
-    #   - 6:8 : eta
-    #   - 8   : p_rnd_cen
+    #   - 6:(6 + eta_size) : eta
+    #   - +1   : p_rnd_cen
     # If supervised, 4 additional entries are used:
-    #   - 9:11: beta
-    #   - 11  : mean_concentration
-    #   - 12  : prec_concentration
-    params_shared = np.empty(9 + 4 * supervised, dtype=np.double)
+    #   - +2  : beta
+    #   - +1  : mean_concentration
+    #   - +1  : prec_concentration
+    eta_size = 2 + n_peptide_features * 2
+    params_shared = np.empty(7 + eta_size + 4 * supervised, dtype=np.double)
 
     # Prepare to receive tasks
     working = True
@@ -712,13 +711,13 @@ def worker(comm, rank, data, cfg):
             shape_sigmasq, rate_sigmasq = params_shared[0:2]
             shape_tausq, rate_tausq = params_shared[2:4]
             r, lmbda = params_shared[4:6]
-            eta = params_shared[6:8]
-            p_rnd_cen = params_shared[8]
+            eta = params_shared[6:(6 + eta_size)]
+            p_rnd_cen = params_shared[6 + eta_size]
 
             if supervised:
-                beta = params_shared[9:11]
-                mean_concentration = params_shared[11]
-                prec_concentration = params_shared[12]
+                beta = params_shared[(6 + eta_size + 1):(6 + eta_size + 3)]
+                mean_concentration = params_shared[6 + eta_size + 3]
+                prec_concentration = params_shared[6 + eta_size + 4]
         elif task == TAGS['INIT']:
             # Compute initial values for MCMC iterations
 

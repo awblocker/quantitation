@@ -341,8 +341,8 @@ def rmh_master_nbinom_hyperparams(comm, r_prev, p_prev, MPIROOT=0,
     elif method == 'newton':
         # Build normal approximation to posterior of transformed hyperparameters.
         # Aggregating local results from workers.
-        # This assumes that rmh_worker_nbinom_glm_coef() has been called on all
-        # workers.
+        # This assumes that rmh_worker_nbinom_hyperparameters() has been called
+        # on all workers.
         theta_hat, prec = posterior_approx_distributed(
             comm=comm, dim_param=2, MPIROOT=MPIROOT)
 
@@ -452,7 +452,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
         z_hat = np.dot(I, b_hat)
 
         # Condense approximation to a single vector for reduction
-        approx = np.r_[z_hat, I[np.tril_indices(2)]]
+        approx = np.r_[z_hat, I[np.tril_indices(p)]]
 
         # Combine with other approximations on master.
         comm.Reduce([approx, MPI.DOUBLE], None,
@@ -479,7 +479,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
             info = np.dot(sqrt_W_X.T, sqrt_W_X)
 
             # Condense update to a single vector for reduction
-            update = np.r_[grad, info[np.tril_indices(2)]]
+            update = np.r_[grad, info[np.tril_indices(p)]]
 
             # Combine with other updates on master
             comm.Reduce([update, MPI.DOUBLE], None,
@@ -499,7 +499,7 @@ def rmh_worker_glm_coef(comm, b_hat, b_prev, y, X, I, family, w=1, V=None,
             info = np.dot(sqrt_W_X.T, sqrt_W_X)
 
             # Combine informations on master
-            comm.Reduce([info[np.tril_indices(2)], MPI.DOUBLE], None,
+            comm.Reduce([info[np.tril_indices(p)], MPI.DOUBLE], None,
                         op=MPI.SUM, root=MPIROOT)
     else:
         print >> sys.stderr, "Error - method %s unknown" % method
